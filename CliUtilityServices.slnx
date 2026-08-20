@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="CliUtilityServices.Tests/CliUtilityServices.Tests.csproj" />
+  <Project Path="CliUtilityServices/CliUtilityServices.csproj" />
+  <Project Path="CommandResult.Infrastructure/CommandResult.Infrastructure.csproj" />
+  <Project Path="Commands.Infrastructure/Commands.Infrastructure.csproj" />
+</Solution>
