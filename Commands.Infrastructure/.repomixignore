@@ -1,0 +1,367 @@
+# Add patterns to ignore here, one per line
+
+### ============================================ ###
+### === THESE MATCHING FILES WILL BE IGNORED === ###
+### ============================================ ###
+
+### --------------------------------------------------------------------------------------------------------- ###
+### --- THESE ENTRIES ARE SPECIFIC (AND IT PROVIDES FOR CONFIGURATION OF SUBCONATINER UNDER THIS CONTAINER) --- ###
+### --- AND THUS HARDCODED --- ###
+### --- DON'T DELETE IT --- ###
+### --- OTHERWISE, YOU WILL PROBABLY FORGOT THE SOURCE TO COPY IT IN THE FUTURE --- ###
+### --------------------------------------------------------------------------------------------------------- ###
+
+# templates
+[Tt]emplates/
+
+### --------------------------------------------------------------------------------------------------------- ###
+### --- END OF COMMENT --- ###
+### --------------------------------------------------------------------------------------------------------- ###
+
+### --------------------------------------------------------------------------------------------------------- ###
+### --- THESE ENTRIES ARE SPECIFIC (AND IT IS USED FOR PASS THE BUILD (MSBUILD) THAT USES MY CUSTOM CONFIGURATIONS) --- ###
+### --- AND THUS HARDCODED --- ###
+### --- DON'T DELETE IT --- ###
+### --- OTHERWISE, IT MIGHT NOT PASS THE BUILD --- ###
+### --------------------------------------------------------------------------------------------------------- ###
+
+# custom folder
+## local packages
+local-packages
+
+### --------------------------------------------------------------------------------------------------------- ###
+### --- END OF COMMENT --- ###
+### --------------------------------------------------------------------------------------------------------- ###
+
+# temparory files
+[Tt]mp/
+[Tt]emp/
+*-[Tt]emp
+
+### ... and others (swap files, PID files, session temp files)
+*.swp
+*.pid
+*.lock-s
+
+# lock file
+*.lock
+*-lock
+
+### ... and others (package manager and dependency locks)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+paket.lock
+
+# cached
+*.cache
+*.cached
+*-cache
+*-cached
+
+### ... and others (temporary workspace cache)
+*.suo
+*.user
+*.userosscache
+
+# cached file about .NET
+bin/
+obj/
+
+### ... and others (.NET build artifacts and localized outputs)
+[Aa]rtifacts/
+.[Aa]rtifacts/
+_ReSharper*/
+
+# (On Windows) system configuration files
+*.ini
+*.sys
+
+### ... and others (Windows specific configuration and registry templates)
+*.reg
+*.inf
+*.cfg
+*.manifest
+Thumbs.db
+
+# CLI script or module
+*.bat
+*.cmd
+*.sh
+*.ps1
+*.psm1
+
+### ... and others (PowerShell modules and shell environment scripts)
+*.psd1
+*.pssc
+*.bashrc
+*.zshrc
+
+# backups
+*.bak
+*-bak
+
+### ... and others (versioned or historical backups)
+*.old
+*-old
+*.none
+*-none
+*._bak
+~*
+
+# VS plugins
+## vsix
+*.vsix
+
+# VS plugins backup
+.vshistory/
+
+### ... and others (extension local states and component caches)
+.vs/
+.localhistory/
+
+# log
+*.log
+*-log
+
+### ... and others (diagnostic and tracing logs)
+*.trc
+*.etl
+*.svclog
+
+# introductions
+*.md
+*.txt
+
+### ... and others (documentation markup variations)
+*.rst
+*.adoc
+
+# Nuke
+.nuke/
+
+# Cake
+### ... omit content
+build.cake
+tools/
+
+### ... and other batch build tool
+Makefile
+Rakefile
+ant.xml
+
+# git
+.git/
+
+### ... and others (Git internal hooks and attributes)
+.gitattributes
+.gitmodules
+
+## github
+.github/
+workflows/
+
+### ... and others (GitHub issue templates and pull request templates)
+ISSUE_TEMPLATE/
+PULL_REQUEST_TEMPLATE/
+
+## gitlab
+.gitlab
+workflows/
+
+### ... and others (GitLab CI template configs)
+.gitlab-ci.yml
+
+# license
+LICENSE
+
+### ... and others (legal and copyright notices)
+NOTICE
+PATENTS
+
+# configuration
+*.config
+*.json
+*.json5
+
+# configuration about Repomix
+.repomixignore
+*.repomixignore
+
+# configuration about Docker or Docker container
+**/.devcontainer/
+DockerFile
+
+### ... and others Docker container (Compose and overrides)
+docker-compose.yml
+docker-compose.override.yml
+.dockerignore
+
+# configuration about git
+.gitignore
+
+# configuration or rule used on AI
+## Gemini Code Assisant VSC plugin
+Gemini.md
+
+## cline
+.clinerules
+
+## template of rule sets for ai agent
+ai-rules.md
+
+### ... and others AI Agent (Cursor rules, Copilot instructions)
+.cursorrules
+github-copilot-instructions.md
+
+# configuration about VSC
+.vscode/
+
+# configuration about VS
+.vssetting/
+.vssetting[Ss]/
+.suo/
+.vs/
+
+# configuration about .NET SDK 
+nuget.config
+
+# configuration about MonoRepo in .NET 
+*.props
+*.targets
+
+# Test project
+*.Test
+*.Test[Ss]
+
+# Demo project
+*Demo
+*Demo[Ss]
+
+# special folder
+## ideas
+idea/
+idea[Ss]/
+
+## special configuration and my ideas
+my-idea-global.json5
+notification-manager-idea.md
+NotificationTarget.cs
+projects.ignore.json
+
+# images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tif
+*.webp
+*.heic
+*.dwg
+*.psd
+*.raw
+
+### ... and others (vector graphics and raw photography formats)
+*.svg
+*.eps
+*.ai
+*.cr2
+*.nef
+
+# Office
+## Office Word
+*.docx
+*.doc
+
+### --- for older version --- ###
+*.odt
+
+## Office Excel
+*.xlsx
+xls
+
+### --- for older version --- ###
+*.ods
+
+## Office OneNote
+*.one
+*.onetoc2
+
+## Office PowerPoint
+*.pptx
+*.ppt
+
+### --- for older version --- ###
+*.odp
+
+### ... and others Office products (Visio, Project, Publisher)
+*.vsdx
+*.mpp
+*.pub
+
+# Pdf
+*.pdf
+
+# Database
+*.db
+
+# query about database
+## MySQL
+*.mssql
+
+## SQL
+*.sql
+
+## NoSQL
+*.litedb
+
+## sqlLite
+*.sqlite
+
+## MongoDB
+*.ns
+*.[0-9]
+
+*.wt
+WiredTiger
+WiredTiger.wt
+WiredTiger.lock
+
+### ... and others file about MongoDB
+*.bson
+mongod.lock
+
+### ... and other files about other differnt kinds of DB (please comment the DB kind such as #mysql (for MySQL) )
+#mssql
+*.mdf
+*.ldf
+#postgresql
+*.dump
+#oracle
+*.dmp
+
+### ================================================ ###
+### === THESE MATCHING FILES WILL NOT BE IGNORED === ###
+### ================================================ ###
+
+# README
+!**/README.md
+
+# solution configuration files
+## newer version (at 2026)
+!**/*.slnx
+
+# project configuration files
+!**/*.csproj
+!**/*.proj
+
+# configuration used by MSBuild in .NET 
+!Directory.Build.props
+!Directory.Build.targets
+
+!Directory.Packages.props
+!Directory.Packages.targets
+
+### ... and others (solution legacy file format support if needed)
+!**/*.sln

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 透過C#語言的inline task來在編譯時期檢查該專案所使用的MSBuild版本和.NET SDK版本，若版本過舊則丟出編譯錯誤 -->
+    <MinMSBuildReq>17.0</MinMSBuildReq>
+    <MinNetSdkReq>8.0</MinNetSdkReq>
+    <TargetFrameworks>net10.0;net8.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Version>5.1.0-preview-1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CustomDataAnnotations" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="EnvironmentUtilityServices" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OsVersionUtilityServices" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CommandResult.Infrastructure\CommandResult.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

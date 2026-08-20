@@ -1,0 +1,10 @@
+# Add patterns to ignore here, one per line
+# Example:
+bin/
+obj/
+[Aa]rtifacts
+.[Aa]rtifacts
+
+*.md
+*.txt
+*.log
