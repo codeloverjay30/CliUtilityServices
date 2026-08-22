@@ -9,6 +9,7 @@ using EnvironmentUtilityServices;
 using System.IO.Abstractions;
 using CliUtilityServices.Terminals;
 using CliWrap.Exceptions;
+using CliUtilityServices.Security;
 
 namespace CliUtilityServices.Tests;
 
@@ -21,9 +22,15 @@ public class CliCommandExecutorTests
     private readonly Mock<ICliResultProcessor> _mockResultProcessor = new(MockBehavior.Strict);
     private readonly Mock<ICommandExecutionEngine> _mockExecutionEngine = new(MockBehavior.Strict);
 
+    private readonly Mock<IExecutableResolver> _mockTrustedExecutableRegistry = new(MockBehavior.Strict);
+
     public CliCommandExecutorTests()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+        _mockTrustedExecutableRegistry.Setup(
+            resolver => resolver.Resolve(It.IsAny<string>())
+        ).Returns("powershell.exe");
     }
 
     [Fact]
@@ -148,7 +155,7 @@ public class CliCommandExecutorTests
 
         var osResolver = new WindowsVersionResolver(new RegistryUtilityServices.RegistryService());
 
-        var executionEngine = new CliWrapCommandExecutionEngine();
+        var executionEngine = new CliWrapCommandExecutionEngine(_mockTrustedExecutableRegistry.Object);
 
         // 模擬底層 IO 拋出 IOException
         _mockFileSystem.Setup(f => f.File.Exists(It.IsAny<string>()))
@@ -182,7 +189,7 @@ public class CliCommandExecutorTests
 
         var osResolver = new WindowsVersionResolver(new RegistryUtilityServices.RegistryService());
 
-        var executionEngine = new CliWrapCommandExecutionEngine();
+        var executionEngine = new CliWrapCommandExecutionEngine(_mockTrustedExecutableRegistry.Object);
 
         // 模擬底層 IO 拋出 IOException
         _mockFileSystem.Setup(f => f.File.Exists(It.IsAny<string>()))

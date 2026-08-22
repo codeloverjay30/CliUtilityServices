@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using CliUtilityServices.Pipes;
+using CliUtilityServices.Security;
 using CliWrap;
 using Commands.Infrastructure;
 
@@ -10,6 +11,20 @@ namespace CliUtilityServices;
 /// </summary>
 public sealed class CliWrapCommandExecutionEngine : ICommandExecutionEngine
 {
+    private readonly IExecutableResolver _executableResolver;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CliWrapCommandExecutionEngine"/> class.
+    /// </summary>
+    /// <param name="executableResolver">The executable resolver.</param>
+    public CliWrapCommandExecutionEngine(
+        IExecutableResolver executableResolver)
+    {
+        ArgumentNullException.ThrowIfNull(executableResolver);
+
+        _executableResolver = executableResolver;
+    }
+
     /// <summary>
     /// Executes the specified command using CliWrap while preserving argument boundaries.
     /// </summary>
@@ -22,11 +37,14 @@ public sealed class CliWrapCommandExecutionEngine : ICommandExecutionEngine
     {
         ArgumentNullException.ThrowIfNull(commandLineInput);
 
+        string executablePath =
+            _executableResolver.Resolve(commandLineInput.Command);
+    
         ICommandPipeStrategy pipeStrategy =
             commandLineInput.PipeStrategy
             ?? new SlidingWindowPipeStrategy(500);
 
-        Command command = Cli.Wrap(commandLineInput.Command)
+        Command command = Cli.Wrap(executablePath)
             .WithArguments(commandLineInput.Arguments)
             .WithValidation(commandLineInput.Validation);
 
