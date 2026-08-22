@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Abstractions;
 using System.Runtime.InteropServices;
 using CliUtilityServices.Pipes;
@@ -11,175 +12,346 @@ using OsVersionUtilityServices;
 namespace CliUtilityServices;
 
 /// <summary>
-/// The implementation of <see cref="global::CliUtilityServices.ICliCommandExecutor"/> 
+/// Provides defensive cross-platform command and process execution services.
 /// </summary>
-public class CliCommandExecutor : ICliCommandExecutor
+public sealed class CliCommandExecutor : ICliCommandExecutor
 {
-    /// <summary>
-    /// The oldest major version that not use bash terminal as default terminal in MacOs OS. 
-    /// </summary>
     private const int MajorVersionThatNotUseBashAsDefaultForMacOS = 18;
-    private readonly ICliResultProcessor _resultProcessor;
 
+    private readonly ICliResultProcessor _resultProcessor;
     private readonly IFileSystem _fileSystem;
     private readonly IEnvironmentService _environmentService;
     private readonly IOSVersionResolver _osVersionResolver;
-    private readonly Dictionary<TerminalTypeOptions, ITerminalProvider> _terminalProviders = new Dictionary<TerminalTypeOptions, ITerminalProvider>();
+
+    private readonly IReadOnlyDictionary<TerminalTypeOptions, ITerminalProvider>
+        _terminalProviders;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CliCommandExecutor"/> class.
+    /// </summary>
+    /// <param name="fileSystem">The file system abstraction.</param>
+    /// <param name="environmentService">The environment abstraction.</param>
+    /// <param name="osVersionResolver">The operating system version resolver.</param>
+    /// <param name="resultProcessor">The command result processor.</param>
     public CliCommandExecutor(
         IFileSystem fileSystem,
         IEnvironmentService environmentService,
         IOSVersionResolver osVersionResolver,
-        ICliResultProcessor resultProcessor
-    )
+        ICliResultProcessor resultProcessor)
     {
-        ArgumentNullException.ThrowIfNull(fileSystem, nameof(fileSystem));
-        ArgumentNullException.ThrowIfNull(environmentService, nameof(environmentService));
-        ArgumentNullException.ThrowIfNull(osVersionResolver, nameof(osVersionResolver));
-        ArgumentNullException.ThrowIfNull(resultProcessor, nameof(resultProcessor));
-
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(environmentService);
+        ArgumentNullException.ThrowIfNull(osVersionResolver);
+        ArgumentNullException.ThrowIfNull(resultProcessor);
 
         _fileSystem = fileSystem;
         _environmentService = environmentService;
         _osVersionResolver = osVersionResolver;
         _resultProcessor = resultProcessor;
 
-        var providers = new ITerminalProvider[]
-        {
+        ITerminalProvider[] providers =
+        [
             new CmdProvider(_fileSystem),
             new PowerShellProvider(_fileSystem),
             new PowerShellCoreProvider(_fileSystem),
             new BashProvider(_fileSystem),
-            new ZshProvider(_fileSystem),
-        };
-        _terminalProviders = providers.ToDictionary(p => p.TerminalType, p => p);
+            new ZshProvider(_fileSystem)
+        ];
+
+        _terminalProviders = providers.ToDictionary(
+            provider => provider.TerminalType,
+            provider => provider);
     }
-
-    /// <inheritdoc/>
-    public async Task<CommandExecutionResult> ExecuteInShellAsync(
-        TerminalTypeOptions terminalType,
-        string command,
-        IEnumerable<string> arguments
-    )
-    {
-        // 這裡可以根據 terminalType 來決定使用哪個 TerminalProvider
-        // 例如，如果 terminalType 是 Cmd，則使用 CmdProvider 來執行命令
-        // 這裡假設你已經有一個方法 GetTerminalProvider(terminalType) 可以返回對應的 ITerminalProvider
-        var terminalProvider = GetTerminalProvider(terminalType);
-
-        CommandLineInput commandLineInput = new CommandLineInputBuilder()
-            .WithCommand(command)
-            .WithArguments(arguments)
-            .WithDefaultEncoding(terminalProvider.DefaultEncoding)
-            .Build();
-
-        // 將原始結果轉換為 CommandExecutionResult
-        return await ExecuteInShellAsync(commandLineInput);
-    }
-
-    /// <inheritdoc/>
-    public async Task<CommandExecutionResult> ExecuteInShellAsync(
-        string command,
-        IEnumerable<string> arguments
-    )
-    {
-        CommandLineInput commandLineInput = new CommandLineInputBuilder()
-            .WithCommand(command)
-            .WithArguments(arguments)
-            .Build();
-
-        return await ExecuteInShellAsync(commandLineInput);
-    }
-
-    /// <inheritdoc/>
-    public async Task<CommandExecutionResult> ExecuteInShellAsync(
-        CommandLineInput commandLineInput
-    )
-    {
-        var strategy = commandLineInput.PipeStrategy ?? new SlidingWindowPipeStrategy(500);
-
-        // 從輸入參數中取得指定的輸出編碼
-        var targetEncoding = commandLineInput.OutputEncoding;
-
-        // 使用你定義的擴充方法 ExecuteWithEncodingAsync 來處理指令執行與編碼轉換
-        // 該方法內部會處理 PipeTarget.ToStringBuilder 並回傳包含輸出的結果
-        var cli = Cli.Wrap(commandLineInput.Command)
-                     .WithArguments(commandLineInput.Arguments);
-        if (!string.IsNullOrWhiteSpace(commandLineInput.WorkingDirectory))
-        {
-            cli = cli.WithWorkingDirectory(commandLineInput.WorkingDirectory);
-        }
-        cli = cli.WithValidation(commandLineInput.Validation);
-        cli = strategy.ConfigurePipes(cli, targetEncoding);
-        var result = await cli.ExecuteWithEncodingAsync(targetEncoding);
-
-        return _resultProcessor.Process(result);
-    }
-
-    /// <inheritdoc/>
-    public async Task<CommandExecutionResult> ExecuteAutoDetectedAsync(
-        CommandLineInput commandLineInput
-    )
-    {
-        // 自動偵測邏輯：Windows 預設使用 Cmd，非 Windows 預設使用 Bash
-        TerminalTypeOptions terminalType;
-        if (_environmentService.IsWindows())
-        {
-            terminalType = TerminalTypeOptions.Cmd;
-        }
-        else if (_environmentService.IsLinux())
-        {
-            terminalType = TerminalTypeOptions.Bash;
-        }
-        else if (_environmentService.IsMacOS())
-        {
-            Version version = _osVersionResolver.Resolve(RuntimeInformation.OSDescription);
-            if (version.Major < MajorVersionThatNotUseBashAsDefaultForMacOS)
-            {
-                terminalType = TerminalTypeOptions.Bash;
-            }
-            else
-            {
-                terminalType = TerminalTypeOptions.Zsh;
-            }
-        }
-        else
-        {
-            // Fallback
-            terminalType = TerminalTypeOptions.Bash;
-        }
-
-        return await ExecuteInShellAsync(terminalType, commandLineInput);
-    }
-
-    /// <inheritdoc/>
-    public async Task<CommandExecutionResult> ExecuteInShellAsync(TerminalTypeOptions terminalType, CommandLineInput commandLineInput)
-    {
-        if (!_terminalProviders.TryGetValue(terminalType, out var provider))
-        {
-            throw new NotSupportedException($"Terminal type '{terminalType}' is not supported.");
-        }
-
-        commandLineInput = commandLineInput with
-        {
-            Command = provider.GetExecutablePath(_environmentService),
-        };
-
-        return await ExecuteInShellAsync(commandLineInput);
-    }
-
 
     /// <summary>
-    /// Get <see cref="global::CliUtilityServices.Terminals.ITerminalProvider"/> instance given <paramref name="terminalType"/> which type is <see cref="global::CliUtilityServices.TerminalTypeOptions"/>
+    /// Executes an executable directly without invoking a shell interpreter.
     /// </summary>
-    /// <param name="terminalType">terminal type to determine which terminal is used</param>
-    /// <returns></returns>
-    /// <exception cref="NotSupportedException">When <paramref name="terminalType"/> is NOT supported (i.e. it is not in <see cref="_terminalProviders"/>)</exception>
-    private ITerminalProvider GetTerminalProvider(TerminalTypeOptions terminalType)
+    /// <param name="commandLineInput">The process execution configuration.</param>
+    /// <param name="cancellationToken">
+    /// A token used to cancel the process execution.
+    /// </param>
+    /// <returns>The process execution result.</returns>
+    public async Task<CommandExecutionResult> ExecuteProcessAsync(
+        CommandLineInput commandLineInput,
+        CancellationToken cancellationToken = default)
     {
-        if (!_terminalProviders.TryGetValue(terminalType, out var provider))
+        ArgumentNullException.ThrowIfNull(commandLineInput);
+
+        ValidateCommandInput(commandLineInput);
+
+        using var timeoutCancellationTokenSource =
+            CreateTimeoutCancellationTokenSource(commandLineInput.Timeout);
+
+        using var linkedCancellationTokenSource =
+            CreateLinkedCancellationTokenSource(
+                cancellationToken,
+                timeoutCancellationTokenSource?.Token);
+
+        CancellationToken effectiveCancellationToken =
+            linkedCancellationTokenSource?.Token
+            ?? timeoutCancellationTokenSource?.Token
+            ?? cancellationToken;
+
+        try
         {
-            throw new NotSupportedException($"Terminal type '{terminalType}' is not supported.");
+            return await ExecuteCoreAsync(
+                commandLineInput,
+                effectiveCancellationToken);
         }
-        return provider;
+        catch (OperationCanceledException)
+            when (
+                timeoutCancellationTokenSource?.IsCancellationRequested == true
+                && !cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Command '{commandLineInput.Command}' exceeded the configured timeout of '{commandLineInput.Timeout}'.");
+        }
+    }
+
+    /// <summary>
+    /// Executes the supplied input using a platform-appropriate terminal.
+    /// </summary>
+    /// <param name="commandLineInput">The command configuration.</param>
+    /// <param name="cancellationToken">
+    /// A token used to cancel execution.
+    /// </param>
+    /// <returns>The command execution result.</returns>
+    public Task<CommandExecutionResult> ExecuteAutoDetectedAsync(
+        CommandLineInput commandLineInput,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandLineInput);
+
+        TerminalTypeOptions terminalType = ResolveDefaultTerminal();
+
+        return ExecuteInShellAsync(
+            terminalType,
+            commandLineInput,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Executes the supplied input using the specified shell.
+    /// </summary>
+    /// <remarks>
+    /// Shell execution should only be used when shell semantics are explicitly required.
+    /// Untrusted script text must not be passed directly to a shell interpreter.
+    /// </remarks>
+    /// <param name="terminalType">The terminal type.</param>
+    /// <param name="commandLineInput">The command configuration.</param>
+    /// <param name="cancellationToken">
+    /// A token used to cancel execution.
+    /// </param>
+    /// <returns>The command execution result.</returns>
+    public Task<CommandExecutionResult> ExecuteInShellAsync(
+        TerminalTypeOptions terminalType,
+        CommandLineInput commandLineInput,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandLineInput);
+
+        ITerminalProvider provider = GetTerminalProvider(terminalType);
+
+        CommandLineInput shellInput = commandLineInput with
+        {
+            Command = provider.GetExecutablePath(_environmentService),
+            DefaultEncoding = provider.DefaultEncoding
+        };
+
+        return ExecuteProcessAsync(
+            shellInput,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Executes an executable and its arguments while preserving argument boundaries.
+    /// </summary>
+    /// <param name="command">The executable to execute.</param>
+    /// <param name="arguments">The arguments passed to the executable.</param>
+    /// <returns>The command execution result.</returns>
+    public Task<CommandExecutionResult> ExecuteInShellAsync(
+        string command,
+        IEnumerable<string> arguments)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(command);
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        var commandLineInput = new CommandLineInputBuilder()
+            .WithEnvironmentService(_environmentService)
+            .WithCommand(command)
+            .WithArguments(arguments)
+            .Build();
+
+        return ExecuteProcessAsync(commandLineInput);
+    }
+
+    /// <summary>
+    /// Performs the actual command execution and output collection.
+    /// </summary>
+    /// <param name="commandLineInput">The command execution configuration.</param>
+    /// <param name="cancellationToken">
+    /// A token used to terminate execution.
+    /// </param>
+    /// <returns>The command execution result.</returns>
+    private async Task<CommandExecutionResult> ExecuteCoreAsync(
+        CommandLineInput commandLineInput,
+        CancellationToken cancellationToken)
+    {
+        ICommandPipeStrategy pipeStrategy =
+            commandLineInput.PipeStrategy
+            ?? new SlidingWindowPipeStrategy(500);
+
+        Command command = Cli.Wrap(commandLineInput.Command)
+            .WithArguments(commandLineInput.Arguments)
+            .WithValidation(commandLineInput.Validation);
+
+        if (!string.IsNullOrWhiteSpace(commandLineInput.WorkingDirectory))
+        {
+            command = command.WithWorkingDirectory(
+                commandLineInput.WorkingDirectory);
+        }
+
+        command = pipeStrategy.ConfigurePipes(
+            command,
+            commandLineInput.OutputEncoding);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        CommandResult rawResult;
+
+        try
+        {
+            rawResult = await command.ExecuteAsync(cancellationToken);
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
+
+        (
+            string standardOutput,
+            string standardError
+        ) = await pipeStrategy.GetResultAsync();
+
+        return new CommandExecutionResult(
+            StandardOutput: standardOutput,
+            StandardError: standardError,
+            ExitCode: rawResult.ExitCode,
+            RunTime: stopwatch.Elapsed);
+    }
+
+    /// <summary>
+    /// Validates command execution configuration before process creation.
+    /// </summary>
+    /// <param name="input">The command input to validate.</param>
+    private static void ValidateCommandInput(CommandLineInput input)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(input.Command);
+        ArgumentNullException.ThrowIfNull(input.Arguments);
+        ArgumentNullException.ThrowIfNull(input.PipeStrategy);
+
+        if (input.Timeout is { } timeout && timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(input.Timeout),
+                timeout,
+                "Timeout must be greater than zero.");
+        }
+    }
+
+    /// <summary>
+    /// Creates a cancellation source for the configured timeout.
+    /// </summary>
+    /// <param name="timeout">The optional timeout.</param>
+    /// <returns>
+    /// A configured cancellation source, or null when timeout is disabled.
+    /// </returns>
+    private static CancellationTokenSource?
+        CreateTimeoutCancellationTokenSource(TimeSpan? timeout)
+    {
+        if (timeout is null)
+        {
+            return null;
+        }
+
+        var cancellationTokenSource = new CancellationTokenSource();
+
+        cancellationTokenSource.CancelAfter(timeout.Value);
+
+        return cancellationTokenSource;
+    }
+
+    /// <summary>
+    /// Creates a linked cancellation source when both caller and timeout tokens exist.
+    /// </summary>
+    /// <param name="callerToken">The caller cancellation token.</param>
+    /// <param name="timeoutToken">The optional timeout cancellation token.</param>
+    /// <returns>
+    /// A linked cancellation source when necessary; otherwise null.
+    /// </returns>
+    private static CancellationTokenSource?
+        CreateLinkedCancellationTokenSource(
+            CancellationToken callerToken,
+            CancellationToken? timeoutToken)
+    {
+        if (!callerToken.CanBeCanceled || timeoutToken is null)
+        {
+            return null;
+        }
+
+        return CancellationTokenSource.CreateLinkedTokenSource(
+            callerToken,
+            timeoutToken.Value);
+    }
+
+    /// <summary>
+    /// Resolves the default terminal for the current operating system.
+    /// </summary>
+    /// <returns>The platform-appropriate terminal type.</returns>
+    private TerminalTypeOptions ResolveDefaultTerminal()
+    {
+        if (_environmentService.IsWindows())
+        {
+            return TerminalTypeOptions.Cmd;
+        }
+
+        if (_environmentService.IsLinux())
+        {
+            return TerminalTypeOptions.Bash;
+        }
+
+        if (_environmentService.IsMacOS())
+        {
+            Version version = _osVersionResolver.Resolve(
+                RuntimeInformation.OSDescription);
+
+            return version.Major < MajorVersionThatNotUseBashAsDefaultForMacOS
+                ? TerminalTypeOptions.Bash
+                : TerminalTypeOptions.Zsh;
+        }
+
+        return TerminalTypeOptions.Bash;
+    }
+
+    /// <summary>
+    /// Resolves a registered terminal provider.
+    /// </summary>
+    /// <param name="terminalType">The terminal type.</param>
+    /// <returns>The registered terminal provider.</returns>
+    /// <exception cref="NotSupportedException">
+    /// Thrown when the requested terminal type is not supported.
+    /// </exception>
+    private ITerminalProvider GetTerminalProvider(
+        TerminalTypeOptions terminalType)
+    {
+        if (_terminalProviders.TryGetValue(
+                terminalType,
+                out ITerminalProvider? provider))
+        {
+            return provider;
+        }
+
+        throw new NotSupportedException(
+            $"Terminal type '{terminalType}' is not supported.");
     }
 }

@@ -46,6 +46,32 @@ public class CommandLineInputBuilder
 
     private IEnvironmentService? _environmentService;
 
+    private TimeSpan? _timeout;
+
+    /// <summary>
+    /// Configures the maximum execution duration.
+    /// </summary>
+    /// <param name="timeout">The maximum allowed execution duration.</param>
+    /// <returns>The current builder instance.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when the timeout is zero or negative.
+    /// </exception>
+    public CommandLineInputBuilder WithTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(timeout),
+                timeout,
+                "Timeout must be greater than zero.");
+        }
+
+        _timeout = timeout;
+
+        return this;
+    }
+
+
     public CommandLineInputBuilder WithCommand(string command)
     {
         ArgumentNullException.ThrowIfNull(command, nameof(command));
@@ -128,21 +154,26 @@ public class CommandLineInputBuilder
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);    
     }
 
+    /// <summary>
+    /// Builds an immutable command-line input instance.
+    /// </summary>
+    /// <returns>The configured command-line input.</returns>
     public CommandLineInput Build()
     {
+        if (_timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(_timeout),
+                _timeout,
+                "Timeout must be greater than zero.");
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(_command, nameof(_command));
         ArgumentNullException.ThrowIfNull(_arguments, nameof(_arguments));
         ArgumentNullException.ThrowIfNull(_workingDirectory, nameof(_workingDirectory));
         ArgumentNullException.ThrowIfNull(_validation, nameof(_validation));
         ArgumentNullException.ThrowIfNull(_pipeStrategy, nameof(_pipeStrategy));
-
         ArgumentNullException.ThrowIfNull(_environmentService, nameof(_environmentService));
-
-        // more complex but with better error messages
-        // if (_environmentService == null)
-        // {
-        //     throw new InvalidOperationException("EnvironmentService must be set before building CommandLineInput.");
-        // }
 
         return new CommandLineInput
         {
@@ -151,10 +182,12 @@ public class CommandLineInputBuilder
             Arguments = _arguments,
             WorkingDirectory = _workingDirectory,
             Validation = _validation,
+            Timeout = _timeout,
             InputEncoding = _inputEncoding,
             OutputEncoding = _outputEncoding,
             DefaultEncoding = _defaultEncoding,
-            EnvironmentService = _environmentService,
+            EnvironmentService = _environmentService
         };
     }
+
 }

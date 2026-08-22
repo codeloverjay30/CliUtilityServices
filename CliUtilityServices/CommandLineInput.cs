@@ -1,4 +1,3 @@
-// File: CliUtilityServices/CommandLineInput.cs
 using System.Text;
 using CliUtilityServices.Pipes;
 using CliWrap;
@@ -7,40 +6,50 @@ using EnvironmentUtilityServices;
 namespace CliUtilityServices;
 
 /// <summary>
-/// Represents the configuration and parameters required to execute a command-line process.
+/// Represents the configuration required to execute a command-line process.
 /// </summary>
 public record class CommandLineInput
 {
     private readonly Encoding? _inputEncoding;
     private readonly Encoding? _outputEncoding;
-
     private Encoding? _defaultEncoding;
 
-    public ICommandPipeStrategy PipeStrategy { get; init; } = new SlidingWindowPipeStrategy(500);
+    /// <summary>
+    /// Gets the strategy used to capture command output.
+    /// </summary>
+    public ICommandPipeStrategy PipeStrategy { get; init; }
+        = new SlidingWindowPipeStrategy(500);
 
     /// <summary>
-    /// Gets the command or executable file name to run.
+    /// Gets the executable or command name to execute.
     /// </summary>
     public required string Command { get; init; }
 
     /// <summary>
-    /// Gets the collection of arguments passed to the command.
+    /// Gets the arguments passed to the executable.
     /// </summary>
-    public IEnumerable<string> Arguments { get; init; } = Array.Empty<string>();
+    public IEnumerable<string> Arguments { get; init; }
+        = Array.Empty<string>();
 
     /// <summary>
-    /// Gets the working directory for the process.
+    /// Gets the working directory used by the child process.
     /// </summary>
     public string WorkingDirectory { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the validation strategy used by CliWrap to determine success based on exit codes.
+    /// Gets the command result validation strategy.
     /// </summary>
-    public CommandResultValidation Validation { get; init; } = CommandResultValidation.ZeroExitCode;
+    public CommandResultValidation Validation { get; init; }
+        = CommandResultValidation.ZeroExitCode;
 
     /// <summary>
-    /// Gets the encoding used for standard input. 
-    /// Defaults to Windows-950 (Big5) on Windows, and UTF-8 on other platforms.
+    /// Gets the maximum execution duration.
+    /// A null value disables the internal timeout.
+    /// </summary>
+    public TimeSpan? Timeout { get; init; }
+
+    /// <summary>
+    /// Gets the encoding used for standard input.
     /// </summary>
     public Encoding InputEncoding
     {
@@ -49,8 +58,7 @@ public record class CommandLineInput
     }
 
     /// <summary>
-    /// Gets the encoding used to decode standard output and standard error.
-    /// Defaults to Windows-950 (Big5) on Windows, and UTF-8 on other platforms.
+    /// Gets the encoding used for standard output and standard error.
     /// </summary>
     public Encoding OutputEncoding
     {
@@ -59,13 +67,8 @@ public record class CommandLineInput
     }
 
     /// <summary>
-    /// Default encoding
+    /// Gets the default encoding used by the process.
     /// </summary>
-    /// <remarks>
-    /// For `init`,
-    /// it might recieve null value, 
-    /// but it defaults to <see cref="FallbackEncoding"/> (using null safety assignment)
-    /// </remarks>
     public Encoding DefaultEncoding
     {
         get => _defaultEncoding ?? FallbackEncoding;
@@ -76,8 +79,14 @@ public record class CommandLineInput
         }
     }
 
+    /// <summary>
+    /// Gets the environment abstraction used to resolve platform-specific behavior.
+    /// </summary>
     public required IEnvironmentService EnvironmentService { get; init; }
 
+    /// <summary>
+    /// Gets a platform-appropriate fallback encoding.
+    /// </summary>
     public Encoding FallbackEncoding
     {
         get
@@ -85,7 +94,10 @@ public record class CommandLineInput
             try
             {
                 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-                return EnvironmentService.IsWindows() ? Encoding.GetEncoding("Big5") : Encoding.UTF8;
+
+                return EnvironmentService.IsWindows()
+                    ? Encoding.GetEncoding("Big5")
+                    : Encoding.UTF8;
             }
             catch
             {
@@ -93,5 +105,4 @@ public record class CommandLineInput
             }
         }
     }
-
 }
