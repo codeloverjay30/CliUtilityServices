@@ -19,6 +19,8 @@ public class CliCommandExecutorTests
     private readonly Mock<IEnvironmentService> _mockEnvironmentService = new(MockBehavior.Strict);
     private readonly Mock<IOSVersionResolver> _mockOsVersionResolver = new(MockBehavior.Strict);
     private readonly Mock<ICliResultProcessor> _mockResultProcessor = new(MockBehavior.Strict);
+    private readonly Mock<ICommandExecutionEngine> _mockExecutionEngine = new(MockBehavior.Strict);
+
     public CliCommandExecutorTests()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -59,7 +61,7 @@ public class CliCommandExecutorTests
             _mockFileSystem.Object,
             _mockEnvironmentService.Object,
             _mockOsVersionResolver.Object,
-            _mockResultProcessor.Object
+            _mockExecutionEngine.Object
         );
 
         // 2. Act
@@ -107,7 +109,7 @@ public class CliCommandExecutorTests
             _mockFileSystem.Object,
             _mockEnvironmentService.Object,
             _mockOsVersionResolver.Object,
-            _mockResultProcessor.Object
+            _mockExecutionEngine.Object
         );
 
         // Act
@@ -146,7 +148,7 @@ public class CliCommandExecutorTests
 
         var osResolver = new WindowsVersionResolver(new RegistryUtilityServices.RegistryService());
 
-        var resultProcessor = new CliResultProcessor();
+        var executionEngine = new CliWrapCommandExecutionEngine();
 
         // 模擬底層 IO 拋出 IOException
         _mockFileSystem.Setup(f => f.File.Exists(It.IsAny<string>()))
@@ -156,7 +158,7 @@ public class CliCommandExecutorTests
             _mockFileSystem.Object,
             environmentService,
             osResolver,
-            resultProcessor
+            executionEngine
         );
 
         // Act
@@ -180,7 +182,7 @@ public class CliCommandExecutorTests
 
         var osResolver = new WindowsVersionResolver(new RegistryUtilityServices.RegistryService());
 
-        var resultProcessor = new CliResultProcessor();
+        var executionEngine = new CliWrapCommandExecutionEngine();
 
         // 模擬底層 IO 拋出 IOException
         _mockFileSystem.Setup(f => f.File.Exists(It.IsAny<string>()))
@@ -193,7 +195,7 @@ public class CliCommandExecutorTests
             _mockFileSystem.Object,
             environmentService,
             osResolver,
-            resultProcessor
+            executionEngine
         );
         // Act
         Func<Task> act = async () => await executor.ExecuteInShellAsync(TerminalTypeOptions.Bash, input);
