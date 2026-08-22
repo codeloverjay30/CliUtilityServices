@@ -82,7 +82,7 @@ public class CommandLineInputBuilder
     public CommandLineInputBuilder WithArguments(IEnumerable<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments, nameof(arguments));
-        _arguments = arguments;
+        _arguments = arguments.ToArray();
         return this;
     }
 
