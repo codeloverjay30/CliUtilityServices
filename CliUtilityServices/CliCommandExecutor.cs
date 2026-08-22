@@ -217,7 +217,7 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
 
         var stopwatch = Stopwatch.StartNew();
 
-        CommandResult rawResult;
+        CliWrap.CommandResult rawResult;
 
         try
         {
