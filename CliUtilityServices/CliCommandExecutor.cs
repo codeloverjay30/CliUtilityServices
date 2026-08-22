@@ -18,7 +18,8 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
 {
     private const int MajorVersionThatNotUseBashAsDefaultForMacOS = 18;
 
-    private readonly ICliResultProcessor _resultProcessor;
+    private readonly ICommandExecutionEngine _executionEngine;
+
     private readonly IFileSystem _fileSystem;
     private readonly IEnvironmentService _environmentService;
     private readonly IOSVersionResolver _osVersionResolver;
@@ -32,22 +33,22 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
     /// <param name="fileSystem">The file system abstraction.</param>
     /// <param name="environmentService">The environment abstraction.</param>
     /// <param name="osVersionResolver">The operating system version resolver.</param>
-    /// <param name="resultProcessor">The command result processor.</param>
+    /// <param name="executionEngine">The low-level command execution engine.</param>
     public CliCommandExecutor(
         IFileSystem fileSystem,
         IEnvironmentService environmentService,
         IOSVersionResolver osVersionResolver,
-        ICliResultProcessor resultProcessor)
+        ICommandExecutionEngine executionEngine)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(environmentService);
         ArgumentNullException.ThrowIfNull(osVersionResolver);
-        ArgumentNullException.ThrowIfNull(resultProcessor);
+        ArgumentNullException.ThrowIfNull(executionEngine);
 
         _fileSystem = fileSystem;
         _environmentService = environmentService;
         _osVersionResolver = osVersionResolver;
-        _resultProcessor = resultProcessor;
+        _executionEngine = executionEngine;
 
         ITerminalProvider[] providers =
         [
@@ -94,7 +95,7 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
 
         try
         {
-            return await ExecuteCoreAsync(
+            return await _executionEngine.ExecuteAsync(
                 commandLineInput,
                 effectiveCancellationToken);
         }
@@ -184,61 +185,7 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
 
         return ExecuteProcessAsync(commandLineInput);
     }
-
-    /// <summary>
-    /// Performs the actual command execution and output collection.
-    /// </summary>
-    /// <param name="commandLineInput">The command execution configuration.</param>
-    /// <param name="cancellationToken">
-    /// A token used to terminate execution.
-    /// </param>
-    /// <returns>The command execution result.</returns>
-    private async Task<CommandExecutionResult> ExecuteCoreAsync(
-        CommandLineInput commandLineInput,
-        CancellationToken cancellationToken)
-    {
-        ICommandPipeStrategy pipeStrategy =
-            commandLineInput.PipeStrategy
-            ?? new SlidingWindowPipeStrategy(500);
-
-        Command command = Cli.Wrap(commandLineInput.Command)
-            .WithArguments(commandLineInput.Arguments)
-            .WithValidation(commandLineInput.Validation);
-
-        if (!string.IsNullOrWhiteSpace(commandLineInput.WorkingDirectory))
-        {
-            command = command.WithWorkingDirectory(
-                commandLineInput.WorkingDirectory);
-        }
-
-        command = pipeStrategy.ConfigurePipes(
-            command,
-            commandLineInput.OutputEncoding);
-
-        var stopwatch = Stopwatch.StartNew();
-
-        CliWrap.CommandResult rawResult;
-
-        try
-        {
-            rawResult = await command.ExecuteAsync(cancellationToken);
-        }
-        finally
-        {
-            stopwatch.Stop();
-        }
-
-        (
-            string standardOutput,
-            string standardError
-        ) = await pipeStrategy.GetResultAsync();
-
-        return new CommandExecutionResult(
-            StandardOutput: standardOutput,
-            StandardError: standardError,
-            ExitCode: rawResult.ExitCode,
-            RunTime: stopwatch.Elapsed);
-    }
+    
 
     /// <summary>
     /// Validates command execution configuration before process creation.
