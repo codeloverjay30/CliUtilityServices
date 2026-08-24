@@ -10,6 +10,7 @@ using System.IO.Abstractions;
 using CliUtilityServices.Terminals;
 using CliWrap.Exceptions;
 using CliUtilityServices.Security;
+using Commands.Infrastructure;
 
 namespace CliUtilityServices.Tests;
 
@@ -17,6 +18,7 @@ public class CliCommandExecutorTests
 {
     private readonly Mock<IFile> _mockFile = new(MockBehavior.Strict);
     private readonly Mock<IFileSystem> _mockFileSystem = new(MockBehavior.Strict);
+    private readonly Mock<IPath> _mockPath;
     private readonly Mock<IEnvironmentService> _mockEnvironmentService = new(MockBehavior.Strict);
     private readonly Mock<IOSVersionResolver> _mockOsVersionResolver = new(MockBehavior.Strict);
     private readonly Mock<ICliResultProcessor> _mockResultProcessor = new(MockBehavior.Strict);
@@ -25,14 +27,45 @@ public class CliCommandExecutorTests
     private readonly Mock<IExecutableResolver> _mockTrustedExecutableRegistry = new(MockBehavior.Strict);
 
     private readonly Mock<IChildEnvironmentResolver> _mockChildEnvironmentResolver = new(MockBehavior.Strict);
+    private readonly CliCommandExecutor _sut;
 
     public CliCommandExecutorTests()
     {
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Encoding.RegisterProvider(
+            CodePagesEncodingProvider.Instance);
 
-        _mockTrustedExecutableRegistry.Setup(
-            resolver => resolver.Resolve(It.IsAny<string>())
-        ).Returns("powershell.exe");
+        _mockFileSystem =
+            new Mock<IFileSystem>(MockBehavior.Strict);
+
+        _mockFile =
+            new Mock<IFile>(MockBehavior.Strict);
+
+        _mockPath =
+            new Mock<IPath>(MockBehavior.Strict);
+
+        _mockEnvironmentService =
+            new Mock<IEnvironmentService>(MockBehavior.Strict);
+
+        _mockOsVersionResolver =
+            new Mock<IOSVersionResolver>(MockBehavior.Strict);
+
+        _mockExecutionEngine =
+            new Mock<ICommandExecutionEngine>(MockBehavior.Strict);
+
+        _mockFileSystem
+            .SetupGet(x => x.File)
+            .Returns(_mockFile.Object);
+
+        _mockFileSystem
+            .SetupGet(x => x.Path)
+            .Returns(_mockPath.Object);
+
+        _sut =
+            new CliCommandExecutor(
+                _mockFileSystem.Object,
+                _mockEnvironmentService.Object,
+                _mockOsVersionResolver.Object,
+                _mockExecutionEngine.Object);
     }
 
     [Fact]
@@ -144,137 +177,121 @@ public class CliCommandExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteCommandAsync_WhenExecutableResolutionFailsWithIOException_ShouldPropagateIOException()
+    public async Task ExecuteProcessAsync_ShouldPreserveExecutableAndArgumentsWithoutShellTransformation()
     {
         // Arrange
-        const string expectedMessage = "Disk busy";
-
-        var environmentService = new EnvironmentService();
-
         var input = new CommandLineInput
         {
-            EnvironmentService = environmentService,
-            Command = "dotnet",
-            Arguments = ["--version"],
+            EnvironmentService =
+                _mockEnvironmentService.Object,
+
+            Command = "git",
+
+            Arguments =
+            [
+                "status",
+                "--short"
+            ]
         };
 
-        var osResolver =
-            new WindowsVersionResolver(
-                new RegistryUtilityServices.RegistryService());
+        var expectedResult =
+            new CommandExecutionResult(
+                StandardOutput: "M file.txt",
+                StandardError: string.Empty,
+                ExitCode: 0,
+                RunTime: TimeSpan.FromMilliseconds(10));
 
-        _mockChildEnvironmentResolver
-            .Setup(x => x.Resolve(
-                It.IsAny<ChildEnvironmentPolicy>(),
-                It.IsAny<IReadOnlyDictionary<string, string?>>()))
-            .Returns(
-                new Dictionary<string, string?>());
+        CommandLineInput? capturedInput = null;
 
-        _mockTrustedExecutableRegistry
-            .Setup(x => x.Resolve(It.IsAny<string>()))
-            .Throws(new IOException(expectedMessage));
-
-        var executionEngine =
-            new CliWrapCommandExecutionEngine(
-                _mockTrustedExecutableRegistry.Object,
-                _mockChildEnvironmentResolver.Object);
-
-        var executor =
-            new CliCommandExecutor(
-                _mockFileSystem.Object,
-                environmentService,
-                osResolver,
-                executionEngine);
+        _mockExecutionEngine
+            .Setup(x => x.ExecuteAsync(
+                It.IsAny<CommandLineInput>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<CommandLineInput, CancellationToken>(
+                (actualInput, _) =>
+                {
+                    capturedInput = actualInput;
+                })
+            .ReturnsAsync(expectedResult);
 
         // Act
-        Func<Task> act = async () =>
-            await executor.ExecuteInShellAsync(
-                TerminalTypeOptions.PowerShell,
-                input);
+        CommandExecutionResult actual =
+            await _sut.ExecuteProcessAsync(input);
 
         // Assert
-        await act.Should()
-            .ThrowAsync<IOException>()
-            .WithMessage($"*{expectedMessage}*");
+        actual.Should().Be(expectedResult);
+
+        capturedInput.Should().NotBeNull();
+
+        capturedInput!.Command
+            .Should()
+            .Be("git");
+
+        capturedInput.Arguments
+            .Should()
+            .Equal(
+                "status",
+                "--short");
+
+        _mockExecutionEngine.Verify(
+            x => x.ExecuteAsync(
+                It.IsAny<CommandLineInput>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
-
-
-    [Fact]
-    public async Task ExecuteInShellAsync_WhenExecutableResolutionThrowsIOException_ShouldPropagateIOException()
+        [Fact]
+    public async Task ExecuteTrustedScriptAsync_WhenUsingBash_ShouldBuildBashScriptArguments()
     {
         // Arrange
-        const string expectedMessage =
-            "Disk failure simulation";
+        const string trustedScript =
+            "echo hello && echo world";
 
-        var environmentService =
-            new EnvironmentService();
-
-        var input = new CommandLineInput
-        {
-            EnvironmentService = environmentService,
-            Command = "ls",
-            Arguments = ["."],
-        };
-
-        var osResolver =
-            new WindowsVersionResolver(
-                new RegistryUtilityServices.RegistryService());
-
-        _mockFileSystem
-            .SetupGet(x => x.File)
-            .Returns(_mockFile.Object);
-
-        _mockFile
-            .Setup(x => x.Exists(
-                @"C:\Program Files\Git\bin\bash.exe"))
+        _mockEnvironmentService
+            .Setup(x => x.IsWindows())
             .Returns(false);
 
-        _mockChildEnvironmentResolver
-            .Setup(x => x.Resolve(
-                It.IsAny<ChildEnvironmentPolicy>(),
-                It.IsAny<IReadOnlyDictionary<string, string?>>()))
-            .Returns(
-                new Dictionary<string, string?>());
+        var expectedResult =
+            new CommandExecutionResult(
+                StandardOutput: "hello\nworld",
+                StandardError: string.Empty,
+                ExitCode: 0,
+                RunTime: TimeSpan.FromMilliseconds(10));
 
-        _mockTrustedExecutableRegistry
-            .Setup(x => x.Resolve(It.IsAny<string>()))
-            .Throws(new IOException(expectedMessage));
+        CommandLineInput? capturedInput = null;
 
-        var executionEngine =
-            new CliWrapCommandExecutionEngine(
-                _mockTrustedExecutableRegistry.Object,
-                _mockChildEnvironmentResolver.Object);
-
-        var executor =
-            new CliCommandExecutor(
-                _mockFileSystem.Object,
-                environmentService,
-                osResolver,
-                executionEngine);
+        _mockExecutionEngine
+            .Setup(x => x.ExecuteAsync(
+                It.IsAny<CommandLineInput>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<CommandLineInput, CancellationToken>(
+                (actualInput, _) =>
+                {
+                    capturedInput = actualInput;
+                })
+            .ReturnsAsync(expectedResult);
 
         // Act
-        Func<Task> act = async () =>
-            await executor.ExecuteInShellAsync(
+        CommandExecutionResult actual =
+            await _sut.ExecuteTrustedScriptAsync(
                 TerminalTypeOptions.Bash,
-                input);
+                trustedScript);
 
         // Assert
-        await act.Should()
-            .ThrowAsync<IOException>()
-            .WithMessage($"*{expectedMessage}*");
+        actual.Should()
+            .Be(expectedResult);
 
-        _mockFileSystem.VerifyGet(
-            x => x.File,
-            Times.Once);
+        capturedInput.Should()
+            .NotBeNull();
 
-        _mockFile.Verify(
-            x => x.Exists(
-                @"C:\Program Files\Git\bin\bash.exe"),
-            Times.Once);
+        capturedInput!.Command
+            .Should()
+            .Be("bash");
 
-        _mockTrustedExecutableRegistry.Verify(
-            x => x.Resolve(It.IsAny<string>()),
-            Times.Once);
+        capturedInput.Arguments
+            .Should()
+            .Equal(
+                "-c",
+                trustedScript);
     }
-
 }

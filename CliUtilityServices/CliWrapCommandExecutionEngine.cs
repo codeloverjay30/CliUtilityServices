@@ -9,67 +9,99 @@ namespace CliUtilityServices;
 /// <summary>
 /// Executes command-line processes through CliWrap.
 /// </summary>
-public sealed class CliWrapCommandExecutionEngine : ICommandExecutionEngine
+public sealed class CliWrapCommandExecutionEngine
+    : ICommandExecutionEngine
 {
-private readonly IExecutableResolver _executableResolver;
-private readonly IChildEnvironmentResolver _environmentResolver;
+    private readonly IExecutableResolver _executableResolver;
+    private readonly IChildEnvironmentResolver _environmentResolver;
+    private readonly IWorkingDirectoryResolver _workingDirectoryResolver;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="CliWrapCommandExecutionEngine"/> class.
-    /// </summary>
-    /// <param name="executableResolver">The executable resolver.</param>
+    /// Initializes a new instance of the
+    /// <see cref="CliWrapCommandExecutionEngine"/> class.
+/// </summary>
+    /// <param name="executableResolver">
+    /// The executable resolver.
+/// </param>
     /// <param name="environmentResolver">
     /// The child-process environment resolver.
-    /// </param>
+/// </param>
+    /// <param name="workingDirectoryResolver">
+    /// The child-process working-directory resolver.
+/// </param>
     public CliWrapCommandExecutionEngine(
         IExecutableResolver executableResolver,
-        IChildEnvironmentResolver environmentResolver)
+        IChildEnvironmentResolver environmentResolver,
+        IWorkingDirectoryResolver workingDirectoryResolver)
     {
-        ArgumentNullException.ThrowIfNull(executableResolver);
-        ArgumentNullException.ThrowIfNull(environmentResolver);
+        ArgumentNullException.ThrowIfNull(
+            executableResolver,
+            nameof(executableResolver));
+
+        ArgumentNullException.ThrowIfNull(
+            environmentResolver,
+            nameof(environmentResolver));
+
+        ArgumentNullException.ThrowIfNull(
+            workingDirectoryResolver,
+            nameof(workingDirectoryResolver));
 
         _executableResolver = executableResolver;
         _environmentResolver = environmentResolver;
+        _workingDirectoryResolver = workingDirectoryResolver;
     }
-
 
     /// <inheritdoc />
     public async Task<CommandExecutionResult> ExecuteAsync(
         CommandLineInput commandLineInput,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(commandLineInput);
+        ArgumentNullException.ThrowIfNull(
+            commandLineInput,
+            nameof(commandLineInput));
 
         string executablePath =
             _executableResolver.Resolve(
                 commandLineInput.Command);
 
-        IReadOnlyDictionary<string, string?> environmentMutations =
-            _environmentResolver.Resolve(
-                commandLineInput.EnvironmentPolicy,
-                commandLineInput.EnvironmentVariables);
+        IReadOnlyDictionary<string, string?>
+            environmentMutations =
+                _environmentResolver.Resolve(
+                    commandLineInput.EnvironmentPolicy,
+                    commandLineInput.EnvironmentVariables);
 
         ICommandPipeStrategy pipeStrategy =
             commandLineInput.PipeStrategy
             ?? new SlidingWindowPipeStrategy(500);
 
-        Command command = Cli.Wrap(executablePath)
-            .WithArguments(commandLineInput.Arguments)
-            .WithEnvironmentVariables(environmentMutations)
-            .WithValidation(commandLineInput.Validation);
+        Command command =
+            Cli.Wrap(executablePath)
+                .WithArguments(
+                    commandLineInput.Arguments)
+                .WithEnvironmentVariables(
+                    environmentMutations)
+                .WithValidation(
+                    commandLineInput.Validation);
 
         if (!string.IsNullOrWhiteSpace(
                 commandLineInput.WorkingDirectory))
         {
-            command = command.WithWorkingDirectory(
-                commandLineInput.WorkingDirectory);
+            string resolvedWorkingDirectory =
+                _workingDirectoryResolver.Resolve(
+                    commandLineInput.WorkingDirectory);
+
+            command =
+                command.WithWorkingDirectory(
+                    resolvedWorkingDirectory);
         }
 
-        command = pipeStrategy.ConfigurePipes(
-            command,
-            commandLineInput.OutputEncoding);
+        command =
+            pipeStrategy.ConfigurePipes(
+                command,
+                commandLineInput.OutputEncoding);
 
-        var stopwatch = Stopwatch.StartNew();
+        var stopwatch =
+            Stopwatch.StartNew();
 
         CliWrap.CommandResult rawResult;
 

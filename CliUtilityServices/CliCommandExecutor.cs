@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Abstractions;
 using System.Runtime.InteropServices;
@@ -6,6 +7,7 @@ using CliUtilityServices.Terminals;
 using CliWrap;
 using CommandResult.Infrastructure;
 using Commands.Infrastructure;
+using CustomDataAnnotations.Maintenance;
 using EnvironmentUtilityServices;
 using OsVersionUtilityServices;
 
@@ -170,6 +172,12 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
     /// <param name="command">The executable to execute.</param>
     /// <param name="arguments">The arguments passed to the executable.</param>
     /// <returns>The command execution result.</returns>
+    /// <remarks>
+    /// Use <see cref="global::CliUtilityServices.CliCommandExecutor.ExecuteProcessAsync(CommandLineInput, CancellationToken)"/> method for direct process execution or ExecuteTrustedScriptAsync for trusted shell scripts.".
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [Obsolete("""Use <see cref="global::CliUtilityServices.CliCommandExecutor.ExecuteProcessAsync(CommandLineInput, CancellationToken)"/> method instead""", error: false)]
+    [TechnicalDebt(CategoryType.CodeSmell|CategoryType.SecurityVulnerability,"""Use <see cref="global::CliUtilityServices.CliCommandExecutor.ExecuteProcessAsync(CommandLineInput, CancellationToken)"/> method instead""")]
     public Task<CommandExecutionResult> ExecuteInShellAsync(
         string command,
         IEnumerable<string> arguments)
@@ -278,6 +286,61 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
         }
 
         return TerminalTypeOptions.Bash;
+    }
+
+    /// <summary>
+    /// Executes explicitly trusted script text through the specified shell interpreter.
+    /// </summary>
+    /// <remarks>
+    /// This method intentionally invokes a shell interpreter.
+    /// The supplied script must be trusted and must not be constructed from
+    /// unvalidated user-controlled script fragments.
+    /// </remarks>
+    /// <param name="terminalType">
+    /// The shell interpreter used to execute the trusted script.
+    /// </param>
+    /// <param name="trustedScript">
+    /// Trusted shell script text.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// A token used to cancel execution.
+    /// </param>
+    /// <returns>The command execution result.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="trustedScript"/> is null, empty, or whitespace.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// Thrown when <paramref name="terminalType"/> is not supported.
+    /// </exception>
+    public Task<CommandExecutionResult> ExecuteTrustedScriptAsync(
+        TerminalTypeOptions terminalType,
+        string trustedScript,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            trustedScript,
+            nameof(trustedScript));
+
+        ITerminalProvider provider =
+            GetTerminalProvider(terminalType);
+
+        var commandLineInput =
+            new CommandLineInputBuilder()
+                .WithEnvironmentService(
+                    _environmentService)
+                .WithCommand(
+                    provider.GetExecutablePath(
+                        _environmentService))
+                .WithArguments(
+                    provider.BuildArgs(
+                        trustedScript))
+                .WithDefaultEncoding(
+                    provider.DefaultEncoding)
+                .Build();
+
+        return ExecuteProcessAsync(
+            commandLineInput,
+            cancellationToken);
     }
 
     /// <summary>
