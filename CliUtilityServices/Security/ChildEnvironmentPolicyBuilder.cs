@@ -2,11 +2,19 @@ namespace CliUtilityServices.Security;
 
 public class ChildEnvironmentPolicyBuilder
 {
+    /// <summary>
+    /// Creates an allow-list child environment policy.
+    /// </summary>
+    /// <param name="environmentVariables">
+    /// The environment variable names permitted by the policy.
+    /// </param>
+    /// <returns>A defensive child environment policy snapshot.</returns>
     public static ChildEnvironmentPolicy CreateWithAllowListMode(
-        IReadOnlySet<string> environmentVariables
-    )
+        IReadOnlySet<string> environmentVariables)
     {
-        ArgumentNullException.ThrowIfNull(environmentVariables, nameof(environmentVariables));
+        ArgumentNullException.ThrowIfNull(
+            environmentVariables);
+
         if (environmentVariables.Count == 0)
         {
             throw new ArgumentException(
@@ -14,14 +22,17 @@ public class ChildEnvironmentPolicyBuilder
                 nameof(environmentVariables));
         }
 
-        ChildEnvironmentPolicy childEnvironmentPolicy = new()
+        return new ChildEnvironmentPolicy
         {
             Mode = ChildEnvironmentMode.AllowList,
-            AllowedVariables = environmentVariables,
-        };
 
-        return childEnvironmentPolicy;
+            AllowedVariables =
+                new HashSet<string>(
+                    environmentVariables,
+                    StringComparer.Ordinal)
+        };
     }
+
 
     public static ChildEnvironmentPolicy CreateWithAllowInheritedListMode(
         IReadOnlySet<string> allowedInheritedVariables
