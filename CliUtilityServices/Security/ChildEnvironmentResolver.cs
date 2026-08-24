@@ -60,14 +60,18 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
                 break;
 
             case ChildEnvironmentMode.AllowList:
-                RemoveVariablesOutsideAllowList(
-                    parentEnvironment,
-                    policy.AllowedVariables,
-                    mutations);
+                    RemoveVariablesOutsideAllowList(
+                        parentEnvironment,
+                        policy.AllowedVariables,
+                        mutations);
 
-                ValidateExplicitVariablesAgainstAllowList(
-                    explicitVariables,
-                    policy.AllowedVariables);
+                    ValidateVariablesAgainstAllowList(
+                        explicitVariables,
+                        policy.AllowedVariables);
+
+                    ValidateVariablesAgainstAllowList(
+                        policy.Overrides,
+                        policy.AllowedVariables);
                 break;
 
             case ChildEnvironmentMode.Isolated:
@@ -171,4 +175,28 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
             }
         }
     }
+
+    /// <summary>
+    /// Validates that all supplied environment variables are permitted
+    /// by the configured allow-list.
+    /// </summary>
+    /// <param name="variables">The variables to validate.</param>
+    /// <param name="allowedVariables">The allowed variable names.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when a variable is not permitted by the allow-list.
+    /// </exception>
+    private static void ValidateVariablesAgainstAllowList(
+        IReadOnlyDictionary<string, string?> variables,
+        IReadOnlySet<string> allowedVariables)
+    {
+        foreach (string name in variables.Keys)
+        {
+            if (!allowedVariables.Contains(name))
+            {
+                throw new InvalidOperationException(
+                    $"Environment variable '{name}' is not permitted by the configured allow-list.");
+            }
+        }
+    }
+
 }
