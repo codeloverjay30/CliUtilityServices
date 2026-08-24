@@ -1,16 +1,23 @@
 namespace CliUtilityServices.Security;
 
 /// <summary>
-/// Resolves the effective environment variables for a child process.
+/// Resolves the effective environment mutations applied to a child process.
 /// </summary>
 public interface IChildEnvironmentResolver
 {
     /// <summary>
-    /// Resolves the environment variables that should be supplied
-    /// to the child process.
+    /// Resolves environment mutations required to enforce the specified
+    /// child-process environment policy.
     /// </summary>
     /// <param name="policy">The child environment policy.</param>
-    /// <returns>The resolved child process environment.</returns>
+    /// <param name="explicitVariables">
+    /// Explicit environment variables requested for the child process.
+    /// </param>
+    /// <returns>
+    /// Environment variable mutations where null values indicate removal
+    /// from the inherited environment.
+    /// </returns>
     IReadOnlyDictionary<string, string?> Resolve(
-        ChildEnvironmentPolicy policy);
+        ChildEnvironmentPolicy policy,
+        IReadOnlyDictionary<string, string?> explicitVariables);
 }

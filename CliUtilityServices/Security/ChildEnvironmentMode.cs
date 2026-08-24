@@ -6,17 +6,17 @@ public enum ChildEnvironmentMode
     /// <summary>
     /// Inherits the complete parent process environment.
     /// </summary>
-    InheritAll,
+    InheritAll = 16 ,
 
     /// <summary>
     /// Inherits only explicitly allowed parent environment variables.
     /// </summary>
-    AllowInheritedList,
+    AllowInheritedList = 8,
 
     /// <summary>
     /// Explicitly allow specific environment variables.
     /// </summary>
-    AllowList,
+    AllowList = 2,
 
     /// <summary>
     /// Explicitly deny specific environment variables.
@@ -26,10 +26,10 @@ public enum ChildEnvironmentMode
     /// since the blacklist is numerous, and we can't enumerate it infinitely.
     /// Thus, ALWAYS use it with other modes (using flags) 
     /// </remark>
-    DenyList,
+    DenyList = 1,
 
     /// <summary>
     /// Does not intentionally inherit parent environment variables.
     /// </summary>
-    Isolated
+    Isolated = 4
 }
