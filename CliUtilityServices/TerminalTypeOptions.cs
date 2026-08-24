@@ -2,21 +2,38 @@ using System.ComponentModel;
 
 namespace CliUtilityServices;
 
+/// <summary>
+/// Defines supported command shell implementations.
+/// </summary>
 public enum TerminalTypeOptions
 {
-    [Description("DOS Command (only supported in Windows)")]
-    Cmd,
+    /// <summary>
+    /// Windows Command Prompt.
+    /// </summary>
+    [Description("Windows Command Prompt (cmd.exe)")]
+    Cmd = 0,
 
-    [Description("PowerShell with version <= 4 (only supported in Windows)")]
-    PowerShell,
+    /// <summary>
+    /// Windows PowerShell, typically version 5.1 or earlier.
+    /// </summary>
+    [Description("Windows PowerShell (powershell.exe, Windows only)")]
+    PowerShell = 1,
 
-    [Description("PowerShell Core (i.e. PowerShell 5+) (only supported in Windows)")]
-    PowerShellCore,
+    /// <summary>
+    /// Cross-platform PowerShell using pwsh.
+    /// </summary>
+    [Description("PowerShell (pwsh, cross-platform)")]
+    PowerShellCore = 2,
 
-    [Description("Bash (usually used in Linux)")]
-    Bash,
+    /// <summary>
+    /// Bash shell.
+    /// </summary>
+    [Description("Bash shell")]
+    Bash = 3,
 
-    [Description("Zsh (used in macOs Catalina 10.15+ )")]
-    Zsh,
-
+    /// <summary>
+    /// Zsh shell.
+    /// </summary>
+    [Description("Zsh shell")]
+    Zsh = 4,
 }
