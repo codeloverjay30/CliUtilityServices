@@ -6,64 +6,213 @@ using CliWrap;
 namespace CliUtilityServices.Pipes;
 
 /// <summary>
-/// Implements a file-stream-based pipe strategy to completely prevent OOM by streaming CLI outputs directly to disk.
-/// Uses <see cref="SemaphoreSlim"/> to support asynchronous execution safety without deadlock.
+/// Implements a file-backed command pipe strategy that streams command output
+/// to temporary files while enforcing write-time output quotas.
 /// </summary>
 public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
 {
+    private const long DefaultMaxOutputBytes =
+        50L * 1024 * 1024;
+
     private readonly IFileSystem _fileSystem;
     private readonly string _stdoutFilePath;
     private readonly string _stderrFilePath;
-    
-    private readonly SemaphoreSlim _fileSemaphore = new(1, 1); 
-    
+
+    private readonly long _maxStandardOutputBytes;
+    private readonly long _maxStandardErrorBytes;
+
+    private readonly SemaphoreSlim _fileSemaphore =
+        new(1, 1);
+
     private Stream? _stdoutStream;
     private Stream? _stderrStream;
-    
-    // 🎯 宣告為 volatile 確保跨執行緒的可見性（Memory Barrier 防禦）
+
     private volatile bool _isDisposed;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="FileStreamPipeStrategy"/> class.
+    /// Initializes a new instance of the
+    /// <see cref="FileStreamPipeStrategy"/> class.
     /// </summary>
-    /// <param name="fileSystem">The file system abstraction.</param>
-    public FileStreamPipeStrategy(IFileSystem fileSystem)
+    /// <param name="fileSystem">
+    /// The file system abstraction used to create and manage temporary files.
+    /// </param>
+    /// <param name="maxStandardOutputBytes">
+    /// The maximum number of bytes that standard output may write.
+    /// </param>
+    /// <param name="maxStandardErrorBytes">
+    /// The maximum number of bytes that standard error may write.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="fileSystem"/> is null.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when an output quota is less than or equal to zero.
+    /// </exception>
+    public FileStreamPipeStrategy(
+        IFileSystem fileSystem,
+        long maxStandardOutputBytes = DefaultMaxOutputBytes,
+        long maxStandardErrorBytes = DefaultMaxOutputBytes)
     {
-        ArgumentNullException.ThrowIfNull(fileSystem);
-        _fileSystem = fileSystem;
+        ArgumentNullException.ThrowIfNull(
+            fileSystem);
 
-        string tempDir = _fileSystem.Path.GetTempPath();
-        _stdoutFilePath = _fileSystem.Path.Combine(tempDir, $"cli_stdout_{Guid.NewGuid():N}.tmp");
-        _stderrFilePath = _fileSystem.Path.Combine(tempDir, $"cli_stderr_{Guid.NewGuid():N}.tmp");
+        ValidateOutputLimit(
+            maxStandardOutputBytes,
+            nameof(maxStandardOutputBytes));
+
+        ValidateOutputLimit(
+            maxStandardErrorBytes,
+            nameof(maxStandardErrorBytes));
+
+        _fileSystem =
+            fileSystem;
+
+        _maxStandardOutputBytes =
+            maxStandardOutputBytes;
+
+        _maxStandardErrorBytes =
+            maxStandardErrorBytes;
+
+        string tempDir =
+            _fileSystem.Path.GetTempPath();
+
+        _stdoutFilePath =
+            _fileSystem.Path.Combine(
+                tempDir,
+                $"cli_stdout_{Guid.NewGuid():N}.tmp");
+
+        _stderrFilePath =
+            _fileSystem.Path.Combine(
+                tempDir,
+                $"cli_stderr_{Guid.NewGuid():N}.tmp");
     }
 
     /// <inheritdoc />
-    public Command ConfigurePipes(Command command, Encoding encoding)
+    public Command ConfigurePipes(
+        Command command,
+        Encoding encoding)
     {
-        ArgumentNullException.ThrowIfNull(command);
-        ArgumentNullException.ThrowIfNull(encoding);
+        ArgumentNullException.ThrowIfNull(
+            command);
 
-        // 🎯 防禦第一關：如果已被處置，在碰鎖之前直接拋出我們自訂的類別異常，避免觸碰已銷毀的 SemaphoreSlim
-        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        ArgumentNullException.ThrowIfNull(
+            encoding);
+
+        ObjectDisposedException.ThrowIf(
+            _isDisposed,
+            this);
 
         _fileSemaphore.Wait();
+
         try
         {
-            // 雙重檢查鎖防禦 (Double-Check Guard)
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
+            ObjectDisposedException.ThrowIf(
+                _isDisposed,
+                this);
 
-            _stdoutStream = _fileSystem.File.Create(_stdoutFilePath, 4096, FileOptions.Asynchronous);
-            _stderrStream = _fileSystem.File.Create(_stderrFilePath, 4096, FileOptions.Asynchronous);
+            if (_stdoutStream is not null ||
+                _stderrStream is not null)
+            {
+                throw new InvalidOperationException(
+                    "The file stream pipe strategy has already been configured.");
+            }
 
-            return command
-                .WithStandardOutputPipe(PipeTarget.ToStream(_stdoutStream))
-                .WithStandardErrorPipe(PipeTarget.ToStream(_stderrStream));
+            Stream? stdoutFileStream = null;
+            Stream? stderrFileStream = null;
+
+            try
+            {
+                stdoutFileStream =
+                    _fileSystem.File.Create(
+                        _stdoutFilePath,
+                        4096,
+                        FileOptions.Asynchronous);
+
+                stderrFileStream =
+                    _fileSystem.File.Create(
+                        _stderrFilePath,
+                        4096,
+                        FileOptions.Asynchronous);
+
+                _stdoutStream =
+                    new BoundedWriteStream(
+                        stdoutFileStream,
+                        _maxStandardOutputBytes,
+                        "standard output");
+
+                // Ownership has been transferred to BoundedWriteStream.
+                stdoutFileStream = null;
+
+                _stderrStream =
+                    new BoundedWriteStream(
+                        stderrFileStream,
+                        _maxStandardErrorBytes,
+                        "standard error");
+
+                // Ownership has been transferred to BoundedWriteStream.
+                stderrFileStream = null;
+
+                return command
+                    .WithStandardOutputPipe(
+                        PipeTarget.ToStream(
+                            _stdoutStream))
+                    .WithStandardErrorPipe(
+                        PipeTarget.ToStream(
+                            _stderrStream));
+            }
+            catch
+            {
+                _stdoutStream?.Dispose();
+                _stderrStream?.Dispose();
+
+                stdoutFileStream?.Dispose();
+                stderrFileStream?.Dispose();
+
+                _stdoutStream = null;
+                _stderrStream = null;
+
+                throw;
+            }
         }
         finally
         {
             _fileSemaphore.Release();
         }
     }
+
+    // GetResultAsync() remains unchanged.
+
+    // FlushAndCloseStreamsInternalAsync() remains unchanged.
+
+    // ReadFileWithLimitAsync() remains unchanged.
+
+    // DisposeAsync() remains unchanged.
+
+    /// <summary>
+    /// Validates that an output quota is a positive byte count.
+    /// </summary>
+    /// <param name="maximumBytes">
+    /// The maximum permitted number of bytes.
+    /// </param>
+    /// <param name="parameterName">
+    /// The name of the parameter being validated.
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="maximumBytes"/> is less than or equal to zero.
+    /// </exception>
+    private static void ValidateOutputLimit(
+        long maximumBytes,
+        string parameterName)
+    {
+        if (maximumBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                maximumBytes,
+                "Maximum output bytes must be greater than zero.");
+        }
+    }
+
 
     /// <inheritdoc />
     public async Task<(string StandardOutput, string StandardError)> GetResultAsync()

@@ -20,4 +20,8 @@
   <ItemGroup>
     <ProjectReference Include="..\CommandResult.Infrastructure\CommandResult.Infrastructure.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CliUtilityServices.Tests" />
+  </ItemGroup>
 </Project>
