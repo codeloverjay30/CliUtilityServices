@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text;
 using CliUtilityServices.Pipes;
 using CliUtilityServices.Security;
@@ -91,13 +92,26 @@ public record class CommandLineInput
         }
     }
 
-    /// <summary>
-    /// Gets the environment abstraction used to resolve platform-specific behavior.
+    // <summary>
+    /// Gets the legacy environment service associated with this request.
     /// </summary>
-    public required IEnvironmentService EnvironmentService { get; init; }
+    /// <remarks>
+    /// This property is retained only for source compatibility.
+    /// The current execution pipeline does not use this value for
+    /// operating-system or security decisions.
+    /// </remarks>
+    [Obsolete(
+        "EnvironmentService is retained for compatibility only. " +
+        "Platform decisions are performed by CliCommandExecutor.")]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public IEnvironmentService? EnvironmentService
+    {
+        get;
+        init;
+    }
 
     /// <summary>
-    /// Gets a platform-appropriate fallback encoding.
+    /// Gets the fallback encoding used when no explicit encoding is configured.
     /// </summary>
     public Encoding FallbackEncoding
     {
@@ -106,10 +120,7 @@ public record class CommandLineInput
             try
             {
                 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-
-                return EnvironmentService.IsWindows()
-                    ? Encoding.GetEncoding("Big5")
-                    : Encoding.UTF8;
+                return Encoding.UTF8;
             }
             catch
             {

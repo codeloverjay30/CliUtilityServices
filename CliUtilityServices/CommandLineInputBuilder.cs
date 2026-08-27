@@ -1,7 +1,9 @@
+using System.ComponentModel;
 using System.Text;
 using CliUtilityServices.Pipes;
 using CliUtilityServices.Security;
 using CliWrap;
+using CustomDataAnnotations.Maintenance;
 using EnvironmentUtilityServices;
 
 namespace CliUtilityServices;
@@ -277,6 +279,12 @@ public sealed class CommandLineInputBuilder
     /// The environment service.
     /// </param>
     /// <returns>The current builder instance.</returns>
+    /// <remarks>
+    /// it should not fetch OS information in a POCO -- CommandLineInput. Platform services should be provided by CliCommandExecutor.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [Obsolete("it should not fetch OS information in a POCO -- CommandLineInput. Platform services should be provided by CliCommandExecutor.")]
+    [TechnicalDebt(CategoryType.InstableBehaviorIssue)]
     public CommandLineInputBuilder WithEnvironmentService(
         IEnvironmentService environmentService)
     {
@@ -594,9 +602,10 @@ public sealed class CommandLineInputBuilder
             _command,
             nameof(_command));
 
-        ArgumentNullException.ThrowIfNull(
-            _environmentService,
-            nameof(_environmentService));
+        /// Remove this check, see the remarks of <see cref="global::CliUtilityServices.CommandLineInputBuilder.WithEnvironmentService(IEnvironmentService)"/> for reason.
+        // ArgumentNullException.ThrowIfNull(
+        //     _environmentService,
+        //     nameof(_environmentService));
 
         ArgumentNullException.ThrowIfNull(
             _pipeStrategy,
@@ -647,7 +656,9 @@ public sealed class CommandLineInputBuilder
             InputEncoding = _inputEncoding!,
             OutputEncoding = _outputEncoding!,
             DefaultEncoding = _defaultEncoding!,
-            EnvironmentService = _environmentService
+            #pragma warning disable CS0618
+                EnvironmentService = _environmentService,
+            #pragma warning restore CS0618
         };
     }
 
