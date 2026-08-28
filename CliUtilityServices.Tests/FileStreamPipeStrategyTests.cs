@@ -6,7 +6,7 @@ using FluentAssertions;
 
 namespace CliUtilityServices.Tests;
 
-public sealed class FileStreamPipeStrategyTests
+public sealed partial class FileStreamPipeStrategyTests
 {
     [Fact]
     public void Constructor_WhenFileSystemIsNull_ShouldThrowArgumentNullException()

@@ -6,7 +6,7 @@ using Moq;
 
 namespace CliUtilityServices.Tests.Pipes;
 
-public sealed class BoundedWriteStreamTests
+public sealed partial class BoundedWriteStreamTests
 {
     [Fact]
     public void Write_WhenWriteFitsWithinLimit_ShouldWriteEntireBuffer()
@@ -36,7 +36,7 @@ public sealed class BoundedWriteStreamTests
         act.Should()
             .NotThrow();
 
-        sut.BytesWritten.Should()
+        sut.ConsumedQuotaBytes.Should()
             .Be(5);
 
         innerStream.Length.Should()
@@ -71,7 +71,7 @@ public sealed class BoundedWriteStreamTests
         act.Should()
             .NotThrow();
 
-        sut.BytesWritten.Should()
+        sut.ConsumedQuotaBytes.Should()
             .Be(5);
 
         innerStream.Length.Should()
@@ -117,7 +117,7 @@ public sealed class BoundedWriteStreamTests
             .WithMessage(
                 "*standard output*5 bytes*6 bytes*");
 
-        sut.BytesWritten.Should()
+        sut.ConsumedQuotaBytes.Should()
             .Be(4);
 
         innerStream.Length.Should()
@@ -193,7 +193,7 @@ public sealed class BoundedWriteStreamTests
         await act.Should()
             .NotThrowAsync();
 
-        sut.BytesWritten.Should()
+        sut.ConsumedQuotaBytes.Should()
             .Be(5);
 
         innerStream.Length.Should()
@@ -230,7 +230,7 @@ public sealed class BoundedWriteStreamTests
             .WithMessage(
                 "*standard error*4 bytes*5 bytes*");
 
-        sut.BytesWritten.Should()
+        sut.ConsumedQuotaBytes.Should()
             .Be(0);
 
         innerStream.Length.Should()
@@ -240,11 +240,13 @@ public sealed class BoundedWriteStreamTests
     }
 
     [Fact]
-    public void Write_WhenUnderlyingStreamFails_ShouldRestoreReservedQuota()
+    public void Write_WhenUnderlyingStreamFails_ShouldRetainConsumedQuota()
     {
         // Arrange
         using var innerStream =
-            new ThrowingWriteStream();
+            new ThrowingWriteStream(
+                new IOException(
+                    "Disk write failed."));
 
         using var sut =
             new BoundedWriteStream(
@@ -268,16 +270,18 @@ public sealed class BoundedWriteStreamTests
             .WithMessage(
                 "*Disk write failed*");
 
-        sut.BytesWritten.Should()
-            .Be(0);
+        sut.ConsumedQuotaBytes.Should()
+            .Be(data.Length);
     }
 
     [Fact]
-    public async Task WriteAsync_WhenUnderlyingStreamFails_ShouldRestoreReservedQuota()
+    public async Task WriteAsync_WhenUnderlyingStreamFails_ShouldRetainConsumedQuota()
     {
         // Arrange
         var innerStream =
-            new ThrowingWriteStream();
+            new ThrowingWriteStream(
+                new IOException(
+                    "Disk write failed."));
 
         var sut =
             new BoundedWriteStream(
@@ -299,8 +303,8 @@ public sealed class BoundedWriteStreamTests
             .WithMessage(
                 "*Disk write failed*");
 
-        sut.BytesWritten.Should()
-            .Be(0);
+        sut.ConsumedQuotaBytes.Should()
+            .Be(data.Length);
 
         await sut.DisposeAsync();
     }
@@ -497,160 +501,5 @@ public sealed class FileStreamPipeStrategyQuotaTests
             .Throw<ArgumentNullException>()
             .WithMessage(
                 "*fileSystem*");
-    }
-}
-
-/// <summary>
-/// Provides a writable test stream that fails every synchronous
-/// and asynchronous write operation.
-/// </summary>
-internal sealed class ThrowingWriteStream : Stream
-{
-    /// <inheritdoc />
-    public override bool CanRead => false;
-
-    /// <inheritdoc />
-    public override bool CanSeek => false;
-
-    /// <inheritdoc />
-    public override bool CanWrite => true;
-
-    /// <inheritdoc />
-    public override long Length => 0;
-
-    /// <inheritdoc />
-    public override long Position
-    {
-        get => 0;
-
-        set => throw new NotSupportedException();
-    }
-
-    /// <inheritdoc />
-    public override void Flush()
-    {
-    }
-
-    /// <inheritdoc />
-    public override Task FlushAsync(
-        CancellationToken cancellationToken)
-    {
-        return Task.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    public override int Read(
-        byte[] buffer,
-        int offset,
-        int count)
-    {
-        throw new NotSupportedException();
-    }
-
-    /// <inheritdoc />
-    public override long Seek(
-        long offset,
-        SeekOrigin origin)
-    {
-        throw new NotSupportedException();
-    }
-
-    /// <inheritdoc />
-    public override void SetLength(
-        long value)
-    {
-        throw new NotSupportedException();
-    }
-
-    /// <inheritdoc />
-    public override void Write(
-        byte[] buffer,
-        int offset,
-        int count)
-    {
-        throw new IOException(
-            "Disk write failed");
-    }
-
-    /// <inheritdoc />
-    public override void Write(
-        ReadOnlySpan<byte> buffer)
-    {
-        throw new IOException(
-            "Disk write failed");
-    }
-
-    /// <inheritdoc />
-    public override ValueTask WriteAsync(
-        ReadOnlyMemory<byte> buffer,
-        CancellationToken cancellationToken = default)
-    {
-        return ValueTask.FromException(
-            new IOException(
-                "Disk write failed"));
-    }
-}
-
-/// <summary>
-/// Provides a read-only test stream for constructor validation.
-/// </summary>
-internal sealed class NonWritableStream : Stream
-{
-    /// <inheritdoc />
-    public override bool CanRead => true;
-
-    /// <inheritdoc />
-    public override bool CanSeek => false;
-
-    /// <inheritdoc />
-    public override bool CanWrite => false;
-
-    /// <inheritdoc />
-    public override long Length => 0;
-
-    /// <inheritdoc />
-    public override long Position
-    {
-        get => 0;
-
-        set => throw new NotSupportedException();
-    }
-
-    /// <inheritdoc />
-    public override void Flush()
-    {
-    }
-
-    /// <inheritdoc />
-    public override int Read(
-        byte[] buffer,
-        int offset,
-        int count)
-    {
-        return 0;
-    }
-
-    /// <inheritdoc />
-    public override long Seek(
-        long offset,
-        SeekOrigin origin)
-    {
-        throw new NotSupportedException();
-    }
-
-    /// <inheritdoc />
-    public override void SetLength(
-        long value)
-    {
-        throw new NotSupportedException();
-    }
-
-    /// <inheritdoc />
-    public override void Write(
-        byte[] buffer,
-        int offset,
-        int count)
-    {
-        throw new NotSupportedException();
     }
 }
