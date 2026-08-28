@@ -23,4 +23,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CliUtilityServices\CliUtilityServices.csproj" />
+  </ItemGroup>
 </Project>
