@@ -113,19 +113,5 @@ public record class CommandLineInput
     /// <summary>
     /// Gets the fallback encoding used when no explicit encoding is configured.
     /// </summary>
-    public Encoding FallbackEncoding
-    {
-        get
-        {
-            try
-            {
-                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-                return Encoding.UTF8;
-            }
-            catch
-            {
-                return Encoding.UTF8;
-            }
-        }
-    }
+    public Encoding FallbackEncoding => Encoding.UTF8;
 }

@@ -24,6 +24,8 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     private readonly SemaphoreSlim _fileSemaphore =
         new(1, 1);
 
+    private Encoding? _outputEncoding;
+
     private Stream? _stdoutStream;
     private Stream? _stderrStream;
 
@@ -140,7 +142,6 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                         _maxStandardOutputBytes,
                         "standard output");
 
-                // Ownership has been transferred to BoundedWriteStream.
                 stdoutFileStream = null;
 
                 _stderrStream =
@@ -149,8 +150,9 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                         _maxStandardErrorBytes,
                         "standard error");
 
-                // Ownership has been transferred to BoundedWriteStream.
                 stderrFileStream = null;
+
+                _outputEncoding = encoding;
 
                 return command
                     .WithStandardOutputPipe(
@@ -170,6 +172,7 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
 
                 _stdoutStream = null;
                 _stderrStream = null;
+                _outputEncoding = null;
 
                 throw;
             }
@@ -179,6 +182,7 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
             _fileSemaphore.Release();
         }
     }
+
 
     // GetResultAsync() remains unchanged.
 
@@ -217,29 +221,57 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     /// <inheritdoc />
     public async Task<(string StandardOutput, string StandardError)> GetResultAsync()
     {
-        // 🎯 防禦第一關：在碰鎖之前直接攔截，這樣就不會引發 SemaphoreSlim 的底層 ObjectDisposedException
-        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        ObjectDisposedException.ThrowIf(
+            _isDisposed,
+            this);
 
-        await _fileSemaphore.WaitAsync();
+        Encoding outputEncoding;
+
+        await _fileSemaphore
+            .WaitAsync()
+            .ConfigureAwait(false);
+
         try
         {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
+            ObjectDisposedException.ThrowIf(
+                _isDisposed,
+                this);
+
+            outputEncoding =
+                _outputEncoding
+                ?? throw new InvalidOperationException(
+                    "The file stream pipe strategy has not been configured.");
         }
         finally
         {
             _fileSemaphore.Release();
         }
 
-        // 先行關閉寫入流
-        await FlushAndCloseStreamsInternalAsync();
+        await FlushAndCloseStreamsInternalAsync()
+            .ConfigureAwait(false);
 
-        const int maxReadBytes = 10 * 1024 * 1024; // 10MB Limit Guard
-        
-        string stdout = await ReadFileWithLimitAsync(_stdoutFilePath, maxReadBytes);
-        string stderr = await ReadFileWithLimitAsync(_stderrFilePath, maxReadBytes);
+        const int maxReadBytes =
+            10 * 1024 * 1024;
 
-        return (stdout, stderr);
+        string stdout =
+            await ReadFileWithLimitAsync(
+                    _stdoutFilePath,
+                    maxReadBytes,
+                    outputEncoding)
+                .ConfigureAwait(false);
+
+        string stderr =
+            await ReadFileWithLimitAsync(
+                    _stderrFilePath,
+                    maxReadBytes,
+                    outputEncoding)
+                .ConfigureAwait(false);
+
+        return (
+            stdout,
+            stderr);
     }
+
 
     private async Task FlushAndCloseStreamsInternalAsync()
     {
@@ -269,15 +301,48 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
         }
     }
 
-    private async Task<string> ReadFileWithLimitAsync(string filePath, int maxBytes)
+    /// <summary>
+    /// Reads captured command output from a file while enforcing
+    /// the configured in-memory read limit.
+    /// </summary>
+    /// <param name="filePath">
+    /// The path of the captured output file.
+    /// </param>
+    /// <param name="maxBytes">
+    /// The maximum number of bytes that may be loaded into memory.
+    /// </param>
+    /// <param name="encoding">
+    /// The encoding used to decode the captured output.
+    /// </param>
+    /// <returns>
+    /// The decoded captured output.
+    /// </returns>
+    private async Task<string> ReadFileWithLimitAsync(
+        string filePath,
+        int maxBytes,
+        Encoding encoding)
     {
-        if (!_fileSystem.File.Exists(filePath))
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            filePath);
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
+            maxBytes);
+
+        ArgumentNullException.ThrowIfNull(
+            encoding);
+
+        if (!_fileSystem.File.Exists(
+                filePath))
         {
             return string.Empty;
         }
 
-        using var stream = _fileSystem.File.OpenRead(filePath);
-        long fileLength = stream.Length;
+        using Stream stream =
+            _fileSystem.File.OpenRead(
+                filePath);
+
+        long fileLength =
+            stream.Length;
 
         if (fileLength == 0)
         {
@@ -286,17 +351,88 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
 
         if (fileLength > maxBytes)
         {
-            stream.Seek(-maxBytes, SeekOrigin.End);
-            byte[] buffer = new byte[maxBytes];
-            _ = await stream.ReadAsync(buffer.AsMemory(0, maxBytes));
-            return "[... Target file output was too large and truncated for memory defense ...]\n" + Encoding.UTF8.GetString(buffer);
+            stream.Seek(
+                -maxBytes,
+                SeekOrigin.End);
+
+            byte[] buffer =
+                new byte[maxBytes];
+
+            int bytesRead =
+                await ReadFullyAsync(
+                        stream,
+                        buffer)
+                    .ConfigureAwait(false);
+
+            return
+                "[... Target file output was too large and truncated for memory defense ...]" +
+                Environment.NewLine +
+                encoding.GetString(
+                    buffer,
+                    0,
+                    bytesRead);
         }
-        else
+
+        int bufferLength =
+            checked((int)fileLength);
+
+        byte[] fullBuffer =
+            new byte[bufferLength];
+
+        int fullBytesRead =
+            await ReadFullyAsync(
+                    stream,
+                    fullBuffer)
+                .ConfigureAwait(false);
+
+        return encoding.GetString(
+            fullBuffer,
+            0,
+            fullBytesRead);
+    }
+
+
+    /// <summary>
+    /// Reads from the specified stream until the destination buffer is full
+    /// or the end of the stream is reached.
+    /// </summary>
+    /// <param name="stream">
+    /// The source stream.
+    /// </param>
+    /// <param name="buffer">
+    /// The destination buffer.
+    /// </param>
+    /// <returns>
+    /// The total number of bytes read.
+    /// </returns>
+    private static async Task<int> ReadFullyAsync(
+        Stream stream,
+        Memory<byte> buffer)
+    {
+        ArgumentNullException.ThrowIfNull(
+            stream);
+
+        int totalBytesRead = 0;
+
+        while (totalBytesRead < buffer.Length)
         {
-            byte[] buffer = new byte[fileLength];
-            _ = await stream.ReadAsync(buffer.AsMemory(0, (int)fileLength));
-            return Encoding.UTF8.GetString(buffer);
+            int bytesRead =
+                await stream.ReadAsync(
+                        buffer[totalBytesRead..])
+                    .ConfigureAwait(false);
+
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            totalBytesRead =
+                checked(
+                    totalBytesRead +
+                    bytesRead);
         }
+
+        return totalBytesRead;
     }
 
     /// <inheritdoc />
