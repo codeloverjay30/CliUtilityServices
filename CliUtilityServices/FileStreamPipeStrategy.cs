@@ -1,5 +1,6 @@
 // File: CliUtilityServices/Pipes/FileStreamPipeStrategy.cs
 using System.IO.Abstractions;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using CliWrap;
 
@@ -183,15 +184,6 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
         }
     }
 
-
-    // GetResultAsync() remains unchanged.
-
-    // FlushAndCloseStreamsInternalAsync() remains unchanged.
-
-    // ReadFileWithLimitAsync() remains unchanged.
-
-    // DisposeAsync() remains unchanged.
-
     /// <summary>
     /// Validates that an output quota is a positive byte count.
     /// </summary>
@@ -219,6 +211,7 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
 
 
     /// <inheritdoc />
+    /// <inheritdoc />
     public async Task<(string StandardOutput, string StandardError)> GetResultAsync()
     {
         ObjectDisposedException.ThrowIf(
@@ -241,14 +234,14 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                 _outputEncoding
                 ?? throw new InvalidOperationException(
                     "The file stream pipe strategy has not been configured.");
+
+            await FlushAndCloseStreamsInternalAsync()
+                .ConfigureAwait(false);
         }
         finally
         {
             _fileSemaphore.Release();
         }
-
-        await FlushAndCloseStreamsInternalAsync()
-            .ConfigureAwait(false);
 
         const int maxReadBytes =
             10 * 1024 * 1024;
@@ -273,33 +266,85 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     }
 
 
+
+    /// <summary>
+    /// Flushes and closes all configured output streams.
+    /// The caller must hold the strategy semaphore before invoking this method.
+    /// </summary>
     private async Task FlushAndCloseStreamsInternalAsync()
     {
-        // 🎯 同樣要在進鎖前防禦，避免非同步併發下生命週期錯亂
-        if (_isDisposed) return;
+        Stream? stdoutStream =
+            _stdoutStream;
 
-        await _fileSemaphore.WaitAsync();
+        Stream? stderrStream =
+            _stderrStream;
+
+        _stdoutStream = null;
+        _stderrStream = null;
+
+        Exception? firstException = null;
+
+        if (stdoutStream is not null)
+        {
+            try
+            {
+                await FlushAndDisposeStreamAsync(
+                        stdoutStream)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                firstException = ex;
+            }
+        }
+
+        if (stderrStream is not null)
+        {
+            try
+            {
+                await FlushAndDisposeStreamAsync(
+                        stderrStream)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                firstException ??= ex;
+            }
+        }
+
+        if (firstException is not null)
+        {
+            // 為了保留原始 exception stack trace。
+            ExceptionDispatchInfo
+                .Capture(firstException)
+                .Throw();
+        }
+    }
+
+    /// <summary>
+    /// Flushes and asynchronously disposes the specified stream.
+    /// </summary>
+    /// <param name="stream">
+    /// The stream to flush and dispose.
+    /// </param>
+    private static async Task FlushAndDisposeStreamAsync(
+        Stream stream)
+    {
         try
         {
-            if (_stdoutStream != null)
-            {
-                await _stdoutStream.FlushAsync();
-                await _stdoutStream.DisposeAsync();
-                _stdoutStream = null;
-            }
-
-            if (_stderrStream != null)
-            {
-                await _stderrStream.FlushAsync();
-                await _stderrStream.DisposeAsync();
-                _stderrStream = null;
-            }
+            await stream
+                .FlushAsync()
+                .ConfigureAwait(false);
         }
         finally
         {
-            _fileSemaphore.Release();
+            await stream
+                .DisposeAsync()
+                .ConfigureAwait(false);
         }
     }
+
+
 
     /// <summary>
     /// Reads captured command output from a file while enforcing
