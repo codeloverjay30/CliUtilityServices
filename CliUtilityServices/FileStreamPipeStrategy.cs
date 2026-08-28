@@ -438,38 +438,90 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        // 💡 快速切換狀態旗標，讓後續併發的呼叫在 WaitAsync() 前被精準攔截
-        if (_isDisposed) return;
-        _isDisposed = true;
-
-        // 確保在銷毀鎖之前，所有寫入流與內部非同步資源被釋放
-        if (_stdoutStream != null)
+        if (_isDisposed)
         {
-            await _stdoutStream.FlushAsync();
-            await _stdoutStream.DisposeAsync();
-            _stdoutStream = null;
+            return;
         }
 
-        if (_stderrStream != null)
-        {
-            await _stderrStream.FlushAsync();
-            await _stderrStream.DisposeAsync();
-            _stderrStream = null;
-        }
+        await _fileSemaphore
+            .WaitAsync()
+            .ConfigureAwait(false);
 
-        // 清除實體磁碟暫存隱患
         try
         {
-            if (_fileSystem.File.Exists(_stdoutFilePath)) _fileSystem.File.Delete(_stdoutFilePath);
-            if (_fileSystem.File.Exists(_stderrFilePath)) _fileSystem.File.Delete(_stderrFilePath);
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+
+            if (_stdoutStream is not null)
+            {
+                await _stdoutStream
+                    .FlushAsync()
+                    .ConfigureAwait(false);
+
+                await _stdoutStream
+                    .DisposeAsync()
+                    .ConfigureAwait(false);
+
+                _stdoutStream = null;
+            }
+
+            if (_stderrStream is not null)
+            {
+                await _stderrStream
+                    .FlushAsync()
+                    .ConfigureAwait(false);
+
+                await _stderrStream
+                    .DisposeAsync()
+                    .ConfigureAwait(false);
+
+                _stderrStream = null;
+            }
+
+            TryDeleteTemporaryFile(
+                _stdoutFilePath);
+
+            TryDeleteTemporaryFile(
+                _stderrFilePath);
         }
-        catch
+        finally
         {
-            // 防禦性空攔截，避免邊緣 I/O 崩潰阻斷 GC 處置鏈
+            _fileSemaphore.Release();
         }
 
-        // 🎯 確定外部不會再存取、內部資源全部關閉後，最後才 Dispose 鎖物件
-        _fileSemaphore.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+
+    /// <summary>
+    /// Attempts to delete a temporary output file.
+    /// </summary>
+    /// <param name="filePath">
+    /// The temporary file path.
+    /// </param>
+    private void TryDeleteTemporaryFile(
+        string filePath)
+    {
+        try
+        {
+            if (_fileSystem.File.Exists(
+                    filePath))
+            {
+                _fileSystem.File.Delete(
+                    filePath);
+            }
+        }
+        catch (IOException)
+        {
+            // Cleanup is best-effort.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Cleanup is best-effort.
+        }
     }
 }
