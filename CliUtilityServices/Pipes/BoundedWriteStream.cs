@@ -5,8 +5,11 @@ namespace CliUtilityServices.Pipes;
 /// stream from receiving more than a configured number of bytes.
 /// </summary>
 /// <remarks>
-/// The limit is enforced before each write reaches the underlying stream.
-/// A write that would exceed the configured quota is rejected in its entirety.
+/// The configured quota is reserved before each write reaches the underlying
+/// stream. Once reserved, quota is not released when the underlying write
+/// fails because a stream may partially write data before throwing.
+/// This fail-closed behavior prevents the effective output from exceeding
+/// the configured quota.
 /// </remarks>
 internal sealed class BoundedWriteStream : Stream
 {
@@ -14,7 +17,7 @@ internal sealed class BoundedWriteStream : Stream
     private readonly long _maximumBytes;
     private readonly string _streamName;
 
-    private long _bytesWritten;
+    private long _consumedQuotaBytes;
     private int _isDisposed;
 
     /// <summary>
@@ -25,7 +28,7 @@ internal sealed class BoundedWriteStream : Stream
     /// The underlying destination stream.
     /// </param>
     /// <param name="maximumBytes">
-    /// The maximum number of bytes that may be written.
+    /// The maximum number of bytes that may be reserved for writes.
     /// </param>
     /// <param name="streamName">
     /// The logical stream name used for diagnostics.
@@ -64,10 +67,15 @@ internal sealed class BoundedWriteStream : Stream
     }
 
     /// <summary>
-    /// Gets the number of bytes successfully written through this stream.
+    /// Gets the number of bytes consumed from the configured write quota.
     /// </summary>
-    public long BytesWritten =>
-        Interlocked.Read(ref _bytesWritten);
+    /// <remarks>
+    /// This value represents reserved quota rather than a guaranteed count
+    /// of bytes successfully persisted by the underlying stream.
+    /// </remarks>
+    public long ConsumedQuotaBytes =>
+        Interlocked.Read(
+            ref _consumedQuotaBytes);
 
     /// <inheritdoc />
     public override bool CanRead => false;
@@ -149,23 +157,15 @@ internal sealed class BoundedWriteStream : Stream
     {
         ThrowIfDisposed();
 
-        ReserveBytes(buffer.Length);
+        ReserveQuota(
+            buffer.Length);
 
-        try
-        {
-            _innerStream.Write(buffer);
-        }
-        catch
-        {
-            ReleaseReservedBytes(
-                buffer.Length);
-
-            throw;
-        }
+        _innerStream.Write(
+            buffer);
     }
 
     /// <inheritdoc />
-    public override async Task WriteAsync(
+    public override Task WriteAsync(
         byte[] buffer,
         int offset,
         int count,
@@ -189,11 +189,12 @@ internal sealed class BoundedWriteStream : Stream
                 "Offset and count exceed the buffer bounds.");
         }
 
-        await WriteAsync(
-            buffer.AsMemory(
-                offset,
-                count),
-            cancellationToken);
+        return WriteAsync(
+                buffer.AsMemory(
+                    offset,
+                    count),
+                cancellationToken)
+            .AsTask();
     }
 
     /// <inheritdoc />
@@ -203,21 +204,14 @@ internal sealed class BoundedWriteStream : Stream
     {
         ThrowIfDisposed();
 
-        ReserveBytes(buffer.Length);
+        ReserveQuota(
+            buffer.Length);
 
-        try
-        {
-            await _innerStream.WriteAsync(
+        await _innerStream
+            .WriteAsync(
                 buffer,
-                cancellationToken);
-        }
-        catch
-        {
-            ReleaseReservedBytes(
-                buffer.Length);
-
-            throw;
-        }
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -248,15 +242,15 @@ internal sealed class BoundedWriteStream : Stream
     }
 
     /// <summary>
-    /// Reserves output bytes before they are written to the underlying stream.
+    /// Atomically reserves quota before a write reaches the underlying stream.
     /// </summary>
     /// <param name="count">
     /// The number of bytes requested by the current write.
     /// </param>
     /// <exception cref="OutputLimitExceededException">
-    /// Thrown when the requested write would exceed the configured quota.
+    /// Thrown when the requested reservation would exceed the configured quota.
     /// </exception>
-    private void ReserveBytes(
+    private void ReserveQuota(
         int count)
     {
         if (count == 0)
@@ -268,7 +262,7 @@ internal sealed class BoundedWriteStream : Stream
         {
             long current =
                 Interlocked.Read(
-                    ref _bytesWritten);
+                    ref _consumedQuotaBytes);
 
             if (count > _maximumBytes - current)
             {
@@ -295,32 +289,13 @@ internal sealed class BoundedWriteStream : Stream
                 current + count;
 
             if (Interlocked.CompareExchange(
-                    ref _bytesWritten,
+                    ref _consumedQuotaBytes,
                     next,
                     current) == current)
             {
                 return;
             }
         }
-    }
-
-    /// <summary>
-    /// Releases a previous reservation when the underlying write fails.
-    /// </summary>
-    /// <param name="count">
-    /// The number of bytes that were reserved.
-    /// </param>
-    private void ReleaseReservedBytes(
-        int count)
-    {
-        if (count == 0)
-        {
-            return;
-        }
-
-        Interlocked.Add(
-            ref _bytesWritten,
-            -count);
     }
 
     /// <summary>
@@ -349,7 +324,8 @@ internal sealed class BoundedWriteStream : Stream
             _innerStream.Dispose();
         }
 
-        base.Dispose(disposing);
+        base.Dispose(
+            disposing);
     }
 
     /// <inheritdoc />
