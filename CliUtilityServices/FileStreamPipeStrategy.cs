@@ -157,9 +157,9 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                     _outputStreamFactory.Create(
                     _stdoutFilePath);
 
-                stdoutFileStream =
+                stderrFileStream =
                     _outputStreamFactory.Create(
-                    _stdoutFilePath);
+                        _stderrFilePath);
 
                 _stdoutStream =
                     new BoundedWriteStream(
