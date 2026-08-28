@@ -32,12 +32,32 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
 
     private volatile bool _isDisposed;
 
+    private readonly IOutputStreamFactory _outputStreamFactory;
+
+
+    public FileStreamPipeStrategy(
+        IFileSystem fileSystem,
+        long maxStandardOutputBytes = DefaultMaxOutputBytes,
+        long maxStandardErrorBytes = DefaultMaxOutputBytes)
+        : this(
+            fileSystem,
+            new FileOutputStreamFactory(
+                fileSystem),
+            maxStandardOutputBytes,
+            maxStandardErrorBytes)
+    {
+    }
+
+
     /// <summary>
     /// Initializes a new instance of the
     /// <see cref="FileStreamPipeStrategy"/> class.
     /// </summary>
     /// <param name="fileSystem">
     /// The file system abstraction used to create and manage temporary files.
+    /// </param>
+    /// <param name="outputStreamFactory">
+    /// The factory to instantiate output stream.
     /// </param>
     /// <param name="maxStandardOutputBytes">
     /// The maximum number of bytes that standard output may write.
@@ -51,13 +71,17 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when an output quota is less than or equal to zero.
     /// </exception>
-    public FileStreamPipeStrategy(
+    internal FileStreamPipeStrategy(
         IFileSystem fileSystem,
+        IOutputStreamFactory outputStreamFactory,
         long maxStandardOutputBytes = DefaultMaxOutputBytes,
         long maxStandardErrorBytes = DefaultMaxOutputBytes)
     {
         ArgumentNullException.ThrowIfNull(
             fileSystem);
+
+        ArgumentNullException.ThrowIfNull(
+            outputStreamFactory);
 
         ValidateOutputLimit(
             maxStandardOutputBytes,
@@ -69,6 +93,9 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
 
         _fileSystem =
             fileSystem;
+
+        _outputStreamFactory =
+            outputStreamFactory;
 
         _maxStandardOutputBytes =
             maxStandardOutputBytes;
@@ -89,6 +116,7 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                 tempDir,
                 $"cli_stderr_{Guid.NewGuid():N}.tmp");
     }
+
 
     /// <inheritdoc />
     public Command ConfigurePipes(
@@ -126,16 +154,12 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
             try
             {
                 stdoutFileStream =
-                    _fileSystem.File.Create(
-                        _stdoutFilePath,
-                        4096,
-                        FileOptions.Asynchronous);
+                    _outputStreamFactory.Create(
+                    _stdoutFilePath);
 
-                stderrFileStream =
-                    _fileSystem.File.Create(
-                        _stderrFilePath,
-                        4096,
-                        FileOptions.Asynchronous);
+                stdoutFileStream =
+                    _outputStreamFactory.Create(
+                    _stdoutFilePath);
 
                 _stdoutStream =
                     new BoundedWriteStream(
