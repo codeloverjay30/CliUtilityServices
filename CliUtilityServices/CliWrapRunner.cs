@@ -32,6 +32,7 @@ which its most of public methods both return <see cref="global::Commands.Infrast
 
 public class CliWrapRunner : ICommandLineRunner
 {
+    private readonly int MajorVersionThatNotUseBashAsDefaultForMacOS = 18;
     private readonly IFileSystem _fileSystem;
     private readonly IEnvironmentService _environmentService;
     private readonly IOSVersionResolver _osVersionResolver;
@@ -105,44 +106,63 @@ public class CliWrapRunner : ICommandLineRunner
     }
 
     /// <summary>
-    /// Executes the command using a terminal automatically selected based on the current operating system.
+    /// Executes the command using a terminal automatically selected for the
+    /// detected operating system.
     /// </summary>
-    /// <param name="commandLineInput">The input configuration.</param>
-    /// <returns>The command result.</returns>
+    /// <param name="commandLineInput">
+    /// The command configuration.
+    /// </param>
+    /// <returns>
+    /// The buffered command execution result.
+    /// </returns>
     public async Task<BufferedCommandResult> ExecuteAutoDetectedAsync(
-        CommandLineInput commandLineInput
-    )
+        CommandLineInput commandLineInput)
     {
-        // 自動偵測邏輯：Windows 預設使用 Cmd，非 Windows 預設使用 Bash
-        TerminalTypeOptions terminalType;
+        ArgumentNullException.ThrowIfNull(
+            commandLineInput);
+
+        TerminalTypeOptions terminalType =
+            ResolveAutoDetectedTerminalType();
+
+        return await ExecuteInShellAsync(
+            terminalType,
+            commandLineInput);
+    }
+
+
+    /// <summary>
+    /// Resolves the terminal type appropriate for the detected operating system
+    /// without starting an external process.
+    /// </summary>
+    /// <returns>
+    /// The terminal type selected for the current platform.
+    /// </returns>
+    internal TerminalTypeOptions ResolveAutoDetectedTerminalType()
+    {
         if (_environmentService.IsWindows())
         {
-            terminalType = TerminalTypeOptions.Cmd;
-        }
-        else if (_environmentService.IsLinux())
-        {
-            terminalType = TerminalTypeOptions.Bash;
-        }
-        else if (_environmentService.IsMacOS())
-        {
-            Version version = _osVersionResolver.Resolve(RuntimeInformation.OSDescription);
-            if (version.Major <= 18)
-            {
-                terminalType = TerminalTypeOptions.Bash;
-            }
-            else
-            {
-                terminalType = TerminalTypeOptions.Zsh;
-            }
-        }
-        else
-        {
-            // Fallback
-            terminalType = TerminalTypeOptions.Bash;
+            return TerminalTypeOptions.Cmd;
         }
 
-        return await ExecuteInShellAsync(terminalType, commandLineInput);
+        if (_environmentService.IsLinux())
+        {
+            return TerminalTypeOptions.Bash;
+        }
+
+        if (_environmentService.IsMacOS())
+        {
+            Version version =
+                _osVersionResolver.Resolve(
+                    RuntimeInformation.OSDescription);
+
+            return version.Major <= MajorVersionThatNotUseBashAsDefaultForMacOS
+                ? TerminalTypeOptions.Bash
+                : TerminalTypeOptions.Zsh;
+        }
+
+        return TerminalTypeOptions.Bash;
     }
+
 
     /// <summary>
     /// Helper method of <see cref="global::CliUtilityServices.CliWrapRunner.ExecuteInShellAsync(TerminalTypeOptions, CommandLineInput)"/>

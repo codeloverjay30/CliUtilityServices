@@ -123,35 +123,34 @@ public class CliWrapRunnerTests
     }
 
     [Fact]
-    public async Task ExecuteAutoDetectedAsync_WhenOnLinux_ShouldUseBashProvider()
+    public void ResolveAutoDetectedTerminalType_WhenOnLinux_ShouldReturnBash()
     {
-        // Arrange
-        _mockOsVersionResolver.Setup(o => o.Priority).Returns((int)PlatformPriorityOptions.High);
-        _mockOsVersionResolver.Setup(o => o.CanHandle(It.IsAny<OSPlatform>())).Returns(true);
-        _mockOsVersionResolver.Setup(o => o.Resolve(It.IsAny<string>())).Returns(new Version(10, 0));
+        _mockEnvironmentService
+            .Setup(service => service.IsWindows())
+            .Returns(false);
 
-        _mockEnvironmentService.Setup(e => e.IsWindows()).Returns(false);
-        _mockEnvironmentService.Setup(e => e.IsLinux()).Returns(true);
-        // Mock 必要的檔案路徑以防拋出錯誤
-        _mockPath.Setup(p => p.Combine(It.IsAny<string>(), "bash.exe")).Returns(@"C:\Windows\System32\bash.exe");
-        _mockFile.Setup(f => f.Exists(It.IsAny<string>())).Returns(true);
+        _mockEnvironmentService
+            .Setup(service => service.IsLinux())
+            .Returns(true);
 
-        var runner = new CliWrapRunner(_mockFileSystem.Object, _mockEnvironmentService.Object, _mockOsVersionResolver.Object);
-        var input = new CommandLineInput
-        {
-            EnvironmentService = _mockEnvironmentService.Object,
-            Command = "ls"
-        };
+        _mockEnvironmentService
+            .Setup(service => service.IsMacOS())
+            .Returns(false);
 
-        // Act
-        // 注意：實際執行需 Mock CliWrap 底層或透過介面測試
-        // 此處為架構示範
-        var result = await runner.ExecuteAutoDetectedAsync(input);
+        var runner =
+            new CliWrapRunner(
+                _mockFileSystem.Object,
+                _mockEnvironmentService.Object,
+                _mockOsVersionResolver.Object);
 
-        // Assert
-        // 驗證邏輯已透過策略模式轉發至 CmdProvider
-        _mockEnvironmentService.Verify(e => e.IsLinux(), Times.AtLeastOnce);
+        TerminalTypeOptions result =
+            runner.ResolveAutoDetectedTerminalType();
+
+        result
+            .Should()
+            .Be(TerminalTypeOptions.Bash);
     }
+
 
     [Theory]
     [InlineData(18, 0, TerminalTypeOptions.Bash)]
