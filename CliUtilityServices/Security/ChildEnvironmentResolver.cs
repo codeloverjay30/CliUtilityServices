@@ -38,6 +38,21 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
 
         StringComparer comparer = _osUtilityService.GetComparer();
 
+        IReadOnlyDictionary<string, string?> normalizedExplicitVariables =
+            NormalizeVariables(
+                explicitVariables,
+                comparer);
+
+        IReadOnlyDictionary<string, string?> normalizedOverrides =
+        NormalizeVariables(
+            policy.Overrides,
+            comparer);
+
+        IReadOnlySet<string> normalizedAllowedVariables =
+            NormalizeVariableNames(
+                policy.AllowedVariables,
+                comparer);
+            
         IReadOnlyDictionary<string, string?> parentEnvironment =
             _environmentSource.GetEnvironmentVariables();
 
@@ -157,6 +172,93 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
             environment[deniedVariable] = null;
         }
     }
+
+    /// <summary>
+    /// Normalizes environment variables using the specified
+    /// operating-system comparison semantics.
+    /// </summary>
+    /// <param name="source">
+    /// The environment variables to normalize.
+    /// </param>
+    /// <param name="comparer">
+    /// The operating-system-specific variable-name comparer.
+    /// </param>
+    /// <returns>
+    /// A normalized environment variable dictionary.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when multiple variable names represent the same logical
+    /// environment variable under the specified comparison semantics.
+    /// </exception>
+    private static IReadOnlyDictionary<string, string?>
+        NormalizeVariables(
+            IReadOnlyDictionary<string, string?> source,
+            StringComparer comparer)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(comparer);
+
+        var normalized =
+            new Dictionary<string, string?>(
+                comparer);
+
+        foreach (KeyValuePair<string, string?> pair in source)
+        {
+            if (!normalized.TryAdd(
+                    pair.Key,
+                    pair.Value))
+            {
+                throw new InvalidOperationException(
+                    $"Environment variable '{pair.Key}' conflicts with another " +
+                    "variable under the current operating-system comparison rules.");
+            }
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Normalizes environment variable names using the specified
+    /// operating-system comparison semantics.
+    /// </summary>
+    /// <param name="source">
+    /// The environment variable names to normalize.
+    /// </param>
+    /// <param name="comparer">
+    /// The operating-system-specific variable-name comparer.
+    /// </param>
+    /// <returns>
+    /// A normalized set of environment variable names.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when multiple names represent the same logical
+    /// environment variable under the specified comparison semantics.
+    /// </exception>
+    private static IReadOnlySet<string>
+        NormalizeVariableNames(
+            IEnumerable<string> source,
+            StringComparer comparer)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(comparer);
+
+        var normalized =
+            new HashSet<string>(
+                comparer);
+
+        foreach (string name in source)
+        {
+            if (!normalized.Add(name))
+            {
+                throw new InvalidOperationException(
+                    $"Environment variable '{name}' conflicts with another " +
+                    "variable under the current operating-system comparison rules.");
+            }
+        }
+
+        return normalized;
+    }
+
 
     /// <summary>
     /// Validates that explicitly supplied variables are permitted by

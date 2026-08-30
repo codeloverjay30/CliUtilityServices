@@ -14,6 +14,16 @@ namespace CliUtilityServices;
 /// </summary>
 public sealed class CommandLineInputBuilder
 {
+    /// <summary>
+    /// Compares configuration keys exactly as supplied by the caller.
+    /// This comparer does not define operating-system environment
+    /// variable identity semantics.
+    /// </summary>
+    private static readonly StringComparer
+        ConfigurationStorageComparer =
+            StringComparer.Ordinal;
+        
+
     private Encoding? _inputEncoding;
     private Encoding? _outputEncoding;
     private Encoding? _defaultEncoding;
@@ -354,9 +364,11 @@ public sealed class CommandLineInputBuilder
             nameof(environmentVariables));
 
         _environmentVariables =
-            new Dictionary<string, string?>(
-                environmentVariables,
-                GetEnvironmentVariableComparer());
+            environmentVariables.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value,
+                ConfigurationStorageComparer);
+
 
         return this;
     }
@@ -384,7 +396,7 @@ public sealed class CommandLineInputBuilder
         var variables =
             new Dictionary<string, string?>(
                 _environmentVariables,
-                GetEnvironmentVariableComparer())
+                ConfigurationStorageComparer)
             {
                 [name] = value
             };
@@ -416,7 +428,7 @@ public sealed class CommandLineInputBuilder
         var variables =
             new Dictionary<string, string?>(
                 _environmentVariables,
-                GetEnvironmentVariableComparer());
+                ConfigurationStorageComparer);
 
         foreach (KeyValuePair<string, string?> pair
                  in environmentVariables)
@@ -437,8 +449,7 @@ public sealed class CommandLineInputBuilder
     public CommandLineInputBuilder ClearEnvironmentVariables()
     {
         _environmentVariables =
-            new Dictionary<string, string?>(
-                GetEnvironmentVariableComparer());
+            new Dictionary<string, string?>();
 
         return this;
     }
@@ -647,7 +658,7 @@ public sealed class CommandLineInputBuilder
             EnvironmentVariables =
                 new Dictionary<string, string?>(
                     _environmentVariables,
-                    GetEnvironmentVariableComparer()),
+                    ConfigurationStorageComparer),
 
             EnvironmentPolicy =
                 CloneEnvironmentPolicy(
@@ -847,7 +858,7 @@ public sealed class CommandLineInputBuilder
             Overrides =
                 new Dictionary<string, string?>(
                     policy.Overrides,
-                    GetEnvironmentVariableComparer())
+                    ConfigurationStorageComparer)
         };
     }
 
@@ -858,29 +869,23 @@ public sealed class CommandLineInputBuilder
     /// The environment variable names to copy.
     /// </param>
     /// <returns>A defensive copy of the names.</returns>
-    private IReadOnlySet<string> CopyEnvironmentVariableSet(
+    /// <summary>
+    /// Creates a defensive copy of environment variable names
+    /// without applying operating-system-specific comparison semantics.
+    /// </summary>
+    /// <param name="source">
+    /// The environment variable names to copy.
+    /// </param>
+    /// <returns>
+    /// A defensive copy that preserves the supplied variable names.
+    /// </returns>
+    private static IReadOnlySet<string> CopyEnvironmentVariableSet(
         IEnumerable<string> source)
     {
         ArgumentNullException.ThrowIfNull(source);
 
         return new HashSet<string>(
             source,
-            GetEnvironmentVariableComparer());
-    }
-
-    /// <summary>
-    /// Gets the platform-appropriate comparer for environment variable names.
-    /// </summary>
-    /// <returns>
-    /// A comparer matching Windows case-insensitive and Unix-like
-    /// case-sensitive environment variable semantics.
-    /// </returns>
-    private StringComparer
-        GetEnvironmentVariableComparer()
-    {
-        ArgumentNullException.ThrowIfNull(_environmentService, nameof(_environmentService));
-        return _environmentService.IsWindows() // 是否為Windows OS
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
+            StringComparer.Ordinal);
     }
 }
