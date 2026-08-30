@@ -9,7 +9,7 @@ namespace CliUtilityServices.Security;
 public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
 {
     private readonly IProcessEnvironmentSource _environmentSource;
-    private readonly IOsUtilityService _osUtiltiyService;
+    private readonly IOsUtilityService _osUtilityService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChildEnvironmentResolver"/> class.
@@ -24,7 +24,7 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
     {
         ArgumentNullException.ThrowIfNull(environmentSource,nameof(environmentSource));
         ArgumentNullException.ThrowIfNull(osUtilityService, nameof(osUtilityService));
-        _osUtiltiyService = osUtilityService;
+        _osUtilityService = osUtilityService;
         _environmentSource = environmentSource;
     }
 
@@ -36,7 +36,7 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(explicitVariables);
 
-        StringComparer comparer = _osUtiltiyService.GetComparer();
+        StringComparer comparer = _osUtilityService.GetComparer();
 
         IReadOnlyDictionary<string, string?> parentEnvironment =
             _environmentSource.GetEnvironmentVariables();
