@@ -1,5 +1,6 @@
 using System.IO.Abstractions;
 using EnvironmentUtilityServices;
+using SymbolicLinkUtilityServices.Security;
 
 namespace CliUtilityServices.Security;
 
@@ -11,11 +12,13 @@ public sealed class WorkingDirectoryResolver
 {
     private readonly IFileSystem _fileSystem;
     private readonly IOsUtilityService _osUtilityService;
+    private readonly IPathLinkValidator _pathLinkValidator;
     private readonly string? _trustedRootDirectory;
 
     /// <summary>
     /// Initializes a new instance of the
-    /// <see cref="WorkingDirectoryResolver"/> class.
+    /// <see cref="WorkingDirectoryResolver"/> class using the default
+    /// filesystem-indirection validator.
     /// </summary>
     /// <param name="fileSystem">
     /// The file system abstraction.
@@ -27,12 +30,45 @@ public sealed class WorkingDirectoryResolver
     /// <param name="trustedRootDirectory">
     /// An optional trusted root directory.
     /// When supplied, resolved working directories must remain
-    /// within this directory tree.
+    /// within this directory tree and must not traverse filesystem
+    /// indirection such as symbolic links or junctions.
     /// </param>
     public WorkingDirectoryResolver(
         IFileSystem fileSystem,
         IOsUtilityService osUtilityService,
         string? trustedRootDirectory = null)
+        : this(
+            fileSystem,
+            osUtilityService,
+            trustedRootDirectory,
+            new PathLinkValidator(fileSystem))
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the
+    /// <see cref="WorkingDirectoryResolver"/> class using the specified
+    /// filesystem-indirection validator.
+    /// </summary>
+    /// <param name="fileSystem">
+    /// The file system abstraction.
+    /// </param>
+    /// <param name="osUtilityService">
+    /// The operating-system utility service used for
+    /// platform-specific path comparison.
+    /// </param>
+    /// <param name="trustedRootDirectory">
+    /// An optional trusted root directory.
+    /// </param>
+    /// <param name="pathLinkValidator">
+    /// The validator used to reject symbolic-link, junction,
+    /// and reparse-point traversal.
+    /// </param>
+    public WorkingDirectoryResolver(
+        IFileSystem fileSystem,
+        IOsUtilityService osUtilityService,
+        string? trustedRootDirectory,
+        IPathLinkValidator pathLinkValidator)
     {
         ArgumentNullException.ThrowIfNull(
             fileSystem,
@@ -42,12 +78,32 @@ public sealed class WorkingDirectoryResolver
             osUtilityService,
             nameof(osUtilityService));
 
+        ArgumentNullException.ThrowIfNull(
+            pathLinkValidator,
+            nameof(pathLinkValidator));
+
         _fileSystem = fileSystem;
         _osUtilityService = osUtilityService;
+        _pathLinkValidator = pathLinkValidator;
 
         _trustedRootDirectory =
             ResolveTrustedRootDirectory(
                 trustedRootDirectory);
+
+        /*
+         * Validate the trusted root itself immediately so that a trusted
+         * root backed by a symbolic link, junction, or reparse point is
+         * rejected at configuration time.
+         *
+         * The same validation is repeated during Resolve() to defend
+         * against filesystem changes that occur after construction.
+         */
+        if (_trustedRootDirectory is not null)
+        {
+            _pathLinkValidator.ValidateNoPathIndirection(
+                _trustedRootDirectory,
+                _trustedRootDirectory);
+        }
     }
 
     /// <inheritdoc />
@@ -84,13 +140,15 @@ public sealed class WorkingDirectoryResolver
                 ex);
         }
 
-        if (!_fileSystem.Directory.Exists(fullPath))
+        if (!_fileSystem.Directory.Exists(
+                fullPath))
         {
             throw new DirectoryNotFoundException(
                 $"Working directory '{fullPath}' does not exist.");
         }
 
-        ValidateTrustedRoot(fullPath);
+        ValidateTrustedRoot(
+            fullPath);
 
         return fullPath;
     }
@@ -122,28 +180,46 @@ public sealed class WorkingDirectoryResolver
                 nameof(trustedRootDirectory));
         }
 
-        string fullPath =
-            _fileSystem.Path.GetFullPath(
-                trustedRootDirectory);
+        string fullPath;
 
-        if (!_fileSystem.Directory.Exists(fullPath))
+        try
+        {
+            fullPath =
+                _fileSystem.Path.GetFullPath(
+                    trustedRootDirectory);
+        }
+        catch (Exception ex)
+            when (
+                ex is ArgumentException
+                or NotSupportedException
+                or PathTooLongException)
+        {
+            throw new InvalidOperationException(
+                $"Trusted root directory '{trustedRootDirectory}' could not be normalized.",
+                ex);
+        }
+
+        if (!_fileSystem.Directory.Exists(
+                fullPath))
         {
             throw new DirectoryNotFoundException(
                 $"Trusted root directory '{fullPath}' does not exist.");
         }
 
-        return NormalizeDirectoryPath(fullPath);
+        return NormalizeDirectoryPath(
+            fullPath);
     }
 
     /// <summary>
-    /// Validates that the resolved working directory remains
-    /// within the configured trusted root.
+    /// Validates that the resolved working directory remains within the
+    /// configured trusted root and does not traverse filesystem indirection.
     /// </summary>
     /// <param name="resolvedWorkingDirectory">
     /// The canonical working directory.
     /// </param>
     /// <exception cref="UnauthorizedAccessException">
-    /// Thrown when the working directory escapes the trusted root.
+    /// Thrown when the working directory escapes the trusted root or
+    /// traverses symbolic links, junctions, or reparse points.
     /// </exception>
     private void ValidateTrustedRoot(
         string resolvedWorkingDirectory)
@@ -160,22 +236,32 @@ public sealed class WorkingDirectoryResolver
         StringComparison comparison =
             _osUtilityService.GetComparison();
 
-        if (normalizedWorkingDirectory.Equals(
+        bool isTrustedRoot =
+            normalizedWorkingDirectory.Equals(
                 _trustedRootDirectory,
-                comparison))
+                comparison);
+
+        bool isTrustedDescendant =
+            normalizedWorkingDirectory.StartsWith(
+                _trustedRootDirectory,
+                comparison);
+
+        if (!isTrustedRoot
+            && !isTrustedDescendant)
         {
-            return;
+            throw new UnauthorizedAccessException(
+                $"Working directory '{resolvedWorkingDirectory}' is outside " +
+                $"the trusted root '{_trustedRootDirectory}'.");
         }
 
-        if (normalizedWorkingDirectory.StartsWith(
-                _trustedRootDirectory,
-                comparison))
-        {
-            return;
-        }
-
-        throw new UnauthorizedAccessException(
-            $"Working directory '{resolvedWorkingDirectory}' is outside the trusted root '{_trustedRootDirectory}'.");
+        /*
+         * Lexical containment alone is insufficient because a path inside
+         * the trusted root may contain a symbolic link or junction that
+         * redirects filesystem access outside the trusted root.
+         */
+        _pathLinkValidator.ValidateNoPathIndirection(
+            _trustedRootDirectory,
+            normalizedWorkingDirectory);
     }
 
     /// <summary>
@@ -192,12 +278,14 @@ public sealed class WorkingDirectoryResolver
         string path)
     {
         string fullPath =
-            _fileSystem.Path.GetFullPath(path);
+            _fileSystem.Path.GetFullPath(
+                path);
 
         char separator =
             _fileSystem.Path.DirectorySeparatorChar;
 
-        if (!fullPath.EndsWith(separator))
+        if (!fullPath.EndsWith(
+                separator))
         {
             fullPath += separator;
         }

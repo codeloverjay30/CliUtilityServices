@@ -18,6 +18,9 @@
     <PackageReference Include="OsVersionUtilityServices" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="SymbolicLinkUtilityServices" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\CommandResult.Infrastructure\CommandResult.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
