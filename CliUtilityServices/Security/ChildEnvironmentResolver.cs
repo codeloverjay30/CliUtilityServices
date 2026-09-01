@@ -6,26 +6,37 @@ namespace CliUtilityServices.Security;
 /// Resolves child-process environment mutations according to an explicit
 /// environment security policy.
 /// </summary>
-public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
+public sealed class ChildEnvironmentResolver
+    : IChildEnvironmentResolver
 {
     private readonly IProcessEnvironmentSource _environmentSource;
     private readonly IOsUtilityService _osUtilityService;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ChildEnvironmentResolver"/> class.
+    /// Initializes a new instance of the
+    /// <see cref="ChildEnvironmentResolver"/> class.
     /// </summary>
     /// <param name="environmentSource">
     /// The parent-process environment source.
     /// </param>
+    /// <param name="osUtilityService">
+    /// The operating-system utility service used to determine authoritative
+    /// environment-variable name comparison semantics.
+    /// </param>
     public ChildEnvironmentResolver(
         IProcessEnvironmentSource environmentSource,
-        IOsUtilityService osUtilityService
-    )
+        IOsUtilityService osUtilityService)
     {
-        ArgumentNullException.ThrowIfNull(environmentSource,nameof(environmentSource));
-        ArgumentNullException.ThrowIfNull(osUtilityService, nameof(osUtilityService));
-        _osUtilityService = osUtilityService;
+        ArgumentNullException.ThrowIfNull(
+            environmentSource,
+            nameof(environmentSource));
+
+        ArgumentNullException.ThrowIfNull(
+            osUtilityService,
+            nameof(osUtilityService));
+
         _environmentSource = environmentSource;
+        _osUtilityService = osUtilityService;
     }
 
     /// <inheritdoc />
@@ -33,31 +44,54 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
         ChildEnvironmentPolicy policy,
         IReadOnlyDictionary<string, string?> explicitVariables)
     {
-        ArgumentNullException.ThrowIfNull(policy);
-        ArgumentNullException.ThrowIfNull(explicitVariables);
+        ArgumentNullException.ThrowIfNull(
+            policy,
+            nameof(policy));
 
-        StringComparer comparer = _osUtilityService.GetComparer();
+        ArgumentNullException.ThrowIfNull(
+            explicitVariables,
+            nameof(explicitVariables));
 
+        StringComparer comparer =
+            _osUtilityService.GetComparer();
+
+        /*
+         * The resolver is the authoritative execution boundary.
+         * Never rely on comparers supplied by caller-owned collections.
+         */
         IReadOnlyDictionary<string, string?> normalizedExplicitVariables =
             NormalizeVariables(
                 explicitVariables,
                 comparer);
 
         IReadOnlyDictionary<string, string?> normalizedOverrides =
-        NormalizeVariables(
-            policy.Overrides,
-            comparer);
+            NormalizeVariables(
+                policy.Overrides,
+                comparer);
 
         IReadOnlySet<string> normalizedAllowedVariables =
             NormalizeVariableNames(
                 policy.AllowedVariables,
                 comparer);
-            
-        IReadOnlyDictionary<string, string?> parentEnvironment =
-            _environmentSource.GetEnvironmentVariables();
+
+        IReadOnlySet<string> normalizedAllowedInheritedVariables =
+            NormalizeVariableNames(
+                policy.AllowedInheritedVariables,
+                comparer);
+
+        IReadOnlySet<string> normalizedDeniedVariables =
+            NormalizeVariableNames(
+                policy.DeniedVariables,
+                comparer);
+
+        IReadOnlyDictionary<string, string?> normalizedParentEnvironment =
+            NormalizeVariables(
+                _environmentSource.GetEnvironmentVariables(),
+                comparer);
 
         var mutations =
-            new Dictionary<string, string?>(comparer);
+            new Dictionary<string, string?>(
+                comparer);
 
         switch (policy.Mode)
         {
@@ -69,29 +103,29 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
 
             case ChildEnvironmentMode.AllowInheritedList:
                 RemoveVariablesOutsideAllowList(
-                    parentEnvironment,
-                    policy.AllowedInheritedVariables,
+                    normalizedParentEnvironment,
+                    normalizedAllowedInheritedVariables,
                     mutations);
                 break;
 
             case ChildEnvironmentMode.AllowList:
-                    RemoveVariablesOutsideAllowList(
-                        parentEnvironment,
-                        policy.AllowedVariables,
-                        mutations);
+                RemoveVariablesOutsideAllowList(
+                    normalizedParentEnvironment,
+                    normalizedAllowedVariables,
+                    mutations);
 
-                    ValidateVariablesAgainstAllowList(
-                        explicitVariables,
-                        policy.AllowedVariables);
+                ValidateVariablesAgainstAllowList(
+                    normalizedExplicitVariables,
+                    normalizedAllowedVariables);
 
-                    ValidateVariablesAgainstAllowList(
-                        policy.Overrides,
-                        policy.AllowedVariables);
+                ValidateVariablesAgainstAllowList(
+                    normalizedOverrides,
+                    normalizedAllowedVariables);
                 break;
 
             case ChildEnvironmentMode.Isolated:
                 RemoveAllParentVariables(
-                    parentEnvironment,
+                    normalizedParentEnvironment,
                     mutations);
                 break;
 
@@ -104,15 +138,15 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
 
         ApplyOverrides(
             mutations,
-            policy.Overrides);
+            normalizedOverrides);
 
         ApplyOverrides(
             mutations,
-            explicitVariables);
+            normalizedExplicitVariables);
 
         ApplyDenyList(
             mutations,
-            policy.DeniedVariables);
+            normalizedDeniedVariables);
 
         return mutations;
     }
@@ -120,6 +154,12 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
     /// <summary>
     /// Marks every parent environment variable for removal.
     /// </summary>
+    /// <param name="parentEnvironment">
+    /// The normalized parent environment.
+    /// </param>
+    /// <param name="mutations">
+    /// The destination mutation dictionary.
+    /// </param>
     private static void RemoveAllParentVariables(
         IReadOnlyDictionary<string, string?> parentEnvironment,
         IDictionary<string, string?> mutations)
@@ -133,6 +173,15 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
     /// <summary>
     /// Marks parent environment variables outside the allow-list for removal.
     /// </summary>
+    /// <param name="parentEnvironment">
+    /// The normalized parent environment.
+    /// </param>
+    /// <param name="allowedVariables">
+    /// The normalized set of allowed environment-variable names.
+    /// </param>
+    /// <param name="mutations">
+    /// The destination mutation dictionary.
+    /// </param>
     private static void RemoveVariablesOutsideAllowList(
         IReadOnlyDictionary<string, string?> parentEnvironment,
         IReadOnlySet<string> allowedVariables,
@@ -148,21 +197,34 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
     }
 
     /// <summary>
-    /// Applies explicit environment variable overrides.
+    /// Applies explicit environment-variable overrides.
     /// </summary>
+    /// <param name="destination">
+    /// The destination mutation dictionary.
+    /// </param>
+    /// <param name="source">
+    /// The normalized source variables.
+    /// </param>
     private static void ApplyOverrides(
         IDictionary<string, string?> destination,
         IReadOnlyDictionary<string, string?> source)
     {
         foreach (KeyValuePair<string, string?> variable in source)
         {
-            destination[variable.Key] = variable.Value;
+            destination[variable.Key] =
+                variable.Value;
         }
     }
 
     /// <summary>
     /// Applies environment-variable denial as the final security boundary.
     /// </summary>
+    /// <param name="environment">
+    /// The destination mutation dictionary.
+    /// </param>
+    /// <param name="deniedVariables">
+    /// The normalized denied environment-variable names.
+    /// </param>
     private static void ApplyDenyList(
         IDictionary<string, string?> environment,
         IReadOnlySet<string> deniedVariables)
@@ -174,17 +236,17 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
     }
 
     /// <summary>
-    /// Normalizes environment variables using the specified
+    /// Materializes environment variables using authoritative
     /// operating-system comparison semantics.
     /// </summary>
     /// <param name="source">
-    /// The environment variables to normalize.
+    /// The environment variables to materialize.
     /// </param>
     /// <param name="comparer">
     /// The operating-system-specific variable-name comparer.
     /// </param>
     /// <returns>
-    /// A normalized environment variable dictionary.
+    /// A dictionary using authoritative operating-system comparison semantics.
     /// </returns>
     /// <exception cref="InvalidOperationException">
     /// Thrown when multiple variable names represent the same logical
@@ -195,8 +257,13 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
             IReadOnlyDictionary<string, string?> source,
             StringComparer comparer)
     {
-        ArgumentNullException.ThrowIfNull(source);
-        ArgumentNullException.ThrowIfNull(comparer);
+        ArgumentNullException.ThrowIfNull(
+            source,
+            nameof(source));
+
+        ArgumentNullException.ThrowIfNull(
+            comparer,
+            nameof(comparer));
 
         var normalized =
             new Dictionary<string, string?>(
@@ -218,29 +285,34 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
     }
 
     /// <summary>
-    /// Normalizes environment variable names using the specified
+    /// Materializes environment-variable names using authoritative
     /// operating-system comparison semantics.
     /// </summary>
     /// <param name="source">
-    /// The environment variable names to normalize.
+    /// The environment-variable names to materialize.
     /// </param>
     /// <param name="comparer">
     /// The operating-system-specific variable-name comparer.
     /// </param>
     /// <returns>
-    /// A normalized set of environment variable names.
+    /// A set using authoritative operating-system comparison semantics.
     /// </returns>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when multiple names represent the same logical
-    /// environment variable under the specified comparison semantics.
+    /// Thrown when multiple names represent the same logical environment
+    /// variable under the specified comparison semantics.
     /// </exception>
     private static IReadOnlySet<string>
         NormalizeVariableNames(
             IEnumerable<string> source,
             StringComparer comparer)
     {
-        ArgumentNullException.ThrowIfNull(source);
-        ArgumentNullException.ThrowIfNull(comparer);
+        ArgumentNullException.ThrowIfNull(
+            source,
+            nameof(source));
+
+        ArgumentNullException.ThrowIfNull(
+            comparer,
+            nameof(comparer));
 
         var normalized =
             new HashSet<string>(
@@ -259,31 +331,16 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
         return normalized;
     }
 
-
-    /// <summary>
-    /// Validates that explicitly supplied variables are permitted by
-    /// the configured allow-list.
-    /// </summary>
-    private static void ValidateExplicitVariablesAgainstAllowList(
-        IReadOnlyDictionary<string, string?> explicitVariables,
-        IReadOnlySet<string> allowedVariables)
-    {
-        foreach (string name in explicitVariables.Keys)
-        {
-            if (!allowedVariables.Contains(name))
-            {
-                throw new InvalidOperationException(
-                    $"Environment variable '{name}' is not permitted by the configured allow-list.");
-            }
-        }
-    }
-
     /// <summary>
     /// Validates that all supplied environment variables are permitted
     /// by the configured allow-list.
     /// </summary>
-    /// <param name="variables">The variables to validate.</param>
-    /// <param name="allowedVariables">The allowed variable names.</param>
+    /// <param name="variables">
+    /// The normalized variables to validate.
+    /// </param>
+    /// <param name="allowedVariables">
+    /// The normalized allowed variable names.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown when a variable is not permitted by the allow-list.
     /// </exception>
@@ -296,9 +353,9 @@ public sealed class ChildEnvironmentResolver : IChildEnvironmentResolver
             if (!allowedVariables.Contains(name))
             {
                 throw new InvalidOperationException(
-                    $"Environment variable '{name}' is not permitted by the configured allow-list.");
+                    $"Environment variable '{name}' is not permitted by " +
+                    "the configured allow-list.");
             }
         }
     }
-
 }
