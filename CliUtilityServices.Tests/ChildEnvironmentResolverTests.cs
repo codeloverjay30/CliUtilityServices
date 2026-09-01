@@ -5,7 +5,7 @@ using Moq;
 
 namespace CliUtilityServices.Security.Tests;
 
-public sealed class ChildEnvironmentResolverTests
+public sealed partial class ChildEnvironmentResolverTests
 {
     private readonly Mock<IOsUtilityService> _mockOsUtilityService = new(MockBehavior.Strict); 
     
