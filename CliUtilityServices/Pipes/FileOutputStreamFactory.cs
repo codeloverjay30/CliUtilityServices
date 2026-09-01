@@ -34,9 +34,10 @@ internal sealed class FileOutputStreamFactory
         ArgumentException.ThrowIfNullOrWhiteSpace(
             path);
 
-        return _fileSystem.File.Create(
+        return _fileSystem.File.Open(
             path,
-            4096,
-            FileOptions.Asynchronous);
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None);
     }
 }
