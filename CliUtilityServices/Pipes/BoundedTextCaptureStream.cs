@@ -351,7 +351,7 @@ internal sealed class BoundedTextCaptureStream : Stream
         {
             ArrayPool<char>.Shared.Return(
                 rentedBuffer,
-                clearArray: false);
+                clearArray: true);
         }
     }
 
