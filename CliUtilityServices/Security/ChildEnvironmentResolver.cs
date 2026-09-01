@@ -21,7 +21,7 @@ public sealed class ChildEnvironmentResolver
     /// </param>
     /// <param name="osUtilityService">
     /// The operating-system utility service used to determine authoritative
-    /// environment-variable name comparison semantics.
+    /// environment-variable comparison semantics.
     /// </param>
     public ChildEnvironmentResolver(
         IProcessEnvironmentSource environmentSource,
@@ -55,39 +55,41 @@ public sealed class ChildEnvironmentResolver
         StringComparer comparer =
             _osUtilityService.GetComparer();
 
-        /*
-         * The resolver is the authoritative execution boundary.
-         * Never rely on comparers supplied by caller-owned collections.
-         */
         IReadOnlyDictionary<string, string?> normalizedExplicitVariables =
             NormalizeVariables(
                 explicitVariables,
-                comparer);
+                comparer,
+                nameof(explicitVariables));
 
         IReadOnlyDictionary<string, string?> normalizedOverrides =
             NormalizeVariables(
                 policy.Overrides,
-                comparer);
+                comparer,
+                nameof(policy.Overrides));
 
         IReadOnlySet<string> normalizedAllowedVariables =
             NormalizeVariableNames(
                 policy.AllowedVariables,
-                comparer);
+                comparer,
+                nameof(policy.AllowedVariables));
 
         IReadOnlySet<string> normalizedAllowedInheritedVariables =
             NormalizeVariableNames(
                 policy.AllowedInheritedVariables,
-                comparer);
+                comparer,
+                nameof(policy.AllowedInheritedVariables));
 
         IReadOnlySet<string> normalizedDeniedVariables =
             NormalizeVariableNames(
                 policy.DeniedVariables,
-                comparer);
+                comparer,
+                nameof(policy.DeniedVariables));
 
         IReadOnlyDictionary<string, string?> normalizedParentEnvironment =
             NormalizeVariables(
                 _environmentSource.GetEnvironmentVariables(),
-                comparer);
+                comparer,
+                "parentEnvironment");
 
         var mutations =
             new Dictionary<string, string?>(
@@ -177,7 +179,7 @@ public sealed class ChildEnvironmentResolver
     /// The normalized parent environment.
     /// </param>
     /// <param name="allowedVariables">
-    /// The normalized set of allowed environment-variable names.
+    /// The normalized allowed environment-variable names.
     /// </param>
     /// <param name="mutations">
     /// The destination mutation dictionary.
@@ -203,7 +205,7 @@ public sealed class ChildEnvironmentResolver
     /// The destination mutation dictionary.
     /// </param>
     /// <param name="source">
-    /// The normalized source variables.
+    /// The normalized source environment variables.
     /// </param>
     private static void ApplyOverrides(
         IDictionary<string, string?> destination,
@@ -236,26 +238,34 @@ public sealed class ChildEnvironmentResolver
     }
 
     /// <summary>
-    /// Materializes environment variables using authoritative
+    /// Materializes and validates environment variables using authoritative
     /// operating-system comparison semantics.
     /// </summary>
     /// <param name="source">
-    /// The environment variables to materialize.
+    /// The environment variables to validate and materialize.
     /// </param>
     /// <param name="comparer">
-    /// The operating-system-specific variable-name comparer.
+    /// The operating-system-specific environment-variable comparer.
+    /// </param>
+    /// <param name="parameterName">
+    /// The logical source name used in validation exceptions.
     /// </param>
     /// <returns>
-    /// A dictionary using authoritative operating-system comparison semantics.
+    /// A validated dictionary using authoritative operating-system
+    /// comparison semantics.
     /// </returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when a variable name or value is invalid.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
     /// Thrown when multiple variable names represent the same logical
-    /// environment variable under the specified comparison semantics.
+    /// variable under the operating-system comparison semantics.
     /// </exception>
     private static IReadOnlyDictionary<string, string?>
         NormalizeVariables(
             IReadOnlyDictionary<string, string?> source,
-            StringComparer comparer)
+            StringComparer comparer,
+            string parameterName)
     {
         ArgumentNullException.ThrowIfNull(
             source,
@@ -265,12 +275,25 @@ public sealed class ChildEnvironmentResolver
             comparer,
             nameof(comparer));
 
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            parameterName,
+            nameof(parameterName));
+
         var normalized =
             new Dictionary<string, string?>(
                 comparer);
 
         foreach (KeyValuePair<string, string?> pair in source)
         {
+            ValidateEnvironmentVariableName(
+                pair.Key,
+                parameterName);
+
+            ValidateEnvironmentVariableValue(
+                pair.Key,
+                pair.Value,
+                parameterName);
+
             if (!normalized.TryAdd(
                     pair.Key,
                     pair.Value))
@@ -285,26 +308,34 @@ public sealed class ChildEnvironmentResolver
     }
 
     /// <summary>
-    /// Materializes environment-variable names using authoritative
-    /// operating-system comparison semantics.
+    /// Materializes and validates environment-variable names using
+    /// authoritative operating-system comparison semantics.
     /// </summary>
     /// <param name="source">
-    /// The environment-variable names to materialize.
+    /// The environment-variable names to validate and materialize.
     /// </param>
     /// <param name="comparer">
-    /// The operating-system-specific variable-name comparer.
+    /// The operating-system-specific environment-variable comparer.
+    /// </param>
+    /// <param name="parameterName">
+    /// The logical source name used in validation exceptions.
     /// </param>
     /// <returns>
-    /// A set using authoritative operating-system comparison semantics.
+    /// A validated set using authoritative operating-system
+    /// comparison semantics.
     /// </returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when an environment-variable name is invalid.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when multiple names represent the same logical environment
-    /// variable under the specified comparison semantics.
+    /// Thrown when multiple names represent the same logical variable
+    /// under the operating-system comparison semantics.
     /// </exception>
     private static IReadOnlySet<string>
         NormalizeVariableNames(
             IEnumerable<string> source,
-            StringComparer comparer)
+            StringComparer comparer,
+            string parameterName)
     {
         ArgumentNullException.ThrowIfNull(
             source,
@@ -314,12 +345,20 @@ public sealed class ChildEnvironmentResolver
             comparer,
             nameof(comparer));
 
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            parameterName,
+            nameof(parameterName));
+
         var normalized =
             new HashSet<string>(
                 comparer);
 
         foreach (string name in source)
         {
+            ValidateEnvironmentVariableName(
+                name,
+                parameterName);
+
             if (!normalized.Add(name))
             {
                 throw new InvalidOperationException(
@@ -332,6 +371,82 @@ public sealed class ChildEnvironmentResolver
     }
 
     /// <summary>
+    /// Validates an environment-variable name at the execution boundary.
+    /// </summary>
+    /// <param name="name">
+    /// The environment-variable name to validate.
+    /// </param>
+    /// <param name="parameterName">
+    /// The logical source name used in the validation exception.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the environment-variable name is empty, whitespace,
+    /// contains an equals sign, or contains a null character.
+    /// </exception>
+    private static void ValidateEnvironmentVariableName(
+        string? name,
+        string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException(
+                "Environment variable names cannot be null, empty, or whitespace.",
+                parameterName);
+        }
+
+        ReadOnlySpan<char> nameSpan =
+            name.AsSpan();
+
+        if (nameSpan.Contains('='))
+        {
+            throw new ArgumentException(
+                "Environment variable names cannot contain '='.",
+                parameterName);
+        }
+
+        if (nameSpan.Contains('\0'))
+        {
+            throw new ArgumentException(
+                "Environment variable names cannot contain null characters.",
+                parameterName);
+        }
+    }
+
+    /// <summary>
+    /// Validates an environment-variable value at the execution boundary.
+    /// </summary>
+    /// <param name="name">
+    /// The environment-variable name associated with the value.
+    /// </param>
+    /// <param name="value">
+    /// The environment-variable value to validate.
+    /// A null value is allowed and represents variable removal.
+    /// </param>
+    /// <param name="parameterName">
+    /// The logical source name used in the validation exception.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the environment-variable value contains a null character.
+    /// </exception>
+    private static void ValidateEnvironmentVariableValue(
+        string name,
+        string? value,
+        string parameterName)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        if (value.AsSpan().Contains('\0'))
+        {
+            throw new ArgumentException(
+                $"Environment variable '{name}' cannot contain null characters in its value.",
+                parameterName);
+        }
+    }
+
+    /// <summary>
     /// Validates that all supplied environment variables are permitted
     /// by the configured allow-list.
     /// </summary>
@@ -339,7 +454,7 @@ public sealed class ChildEnvironmentResolver
     /// The normalized variables to validate.
     /// </param>
     /// <param name="allowedVariables">
-    /// The normalized allowed variable names.
+    /// The normalized allowed environment-variable names.
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown when a variable is not permitted by the allow-list.
@@ -353,8 +468,7 @@ public sealed class ChildEnvironmentResolver
             if (!allowedVariables.Contains(name))
             {
                 throw new InvalidOperationException(
-                    $"Environment variable '{name}' is not permitted by " +
-                    "the configured allow-list.");
+                    $"Environment variable '{name}' is not permitted by the configured allow-list.");
             }
         }
     }
