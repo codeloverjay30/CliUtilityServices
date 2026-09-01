@@ -1,4 +1,3 @@
-// File: CliUtilityServices/Pipes/FileStreamPipeStrategy.cs
 using System.IO.Abstractions;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -10,7 +9,15 @@ namespace CliUtilityServices.Pipes;
 /// Implements a file-backed command pipe strategy that streams command output
 /// to temporary files while enforcing write-time output quotas.
 /// </summary>
-public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
+/// <remarks>
+/// Each instance represents a single command execution lifecycle. Temporary
+/// files and streams are released by <see cref="CleanupAsync"/> regardless of
+/// whether execution succeeds, fails, or is cancelled.
+/// </remarks>
+public class FileStreamPipeStrategy :
+    ICommandPipeStrategy,
+    IExecutionScopedPipeStrategy,
+    IAsyncDisposable
 {
     private const long DefaultMaxOutputBytes =
         50L * 1024 * 1024;
@@ -18,23 +25,33 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     private readonly IFileSystem _fileSystem;
     private readonly string _stdoutFilePath;
     private readonly string _stderrFilePath;
-
     private readonly long _maxStandardOutputBytes;
     private readonly long _maxStandardErrorBytes;
-
     private readonly SemaphoreSlim _fileSemaphore =
         new(1, 1);
+    private readonly IOutputStreamFactory _outputStreamFactory;
 
     private Encoding? _outputEncoding;
-
     private Stream? _stdoutStream;
     private Stream? _stderrStream;
 
+    private bool _isConfigured;
+    private bool _executionCleanupCompleted;
     private volatile bool _isDisposed;
 
-    private readonly IOutputStreamFactory _outputStreamFactory;
-
-
+    /// <summary>
+    /// Initializes a new instance of the
+    /// <see cref="FileStreamPipeStrategy"/> class.
+    /// </summary>
+    /// <param name="fileSystem">
+    /// The file-system abstraction used to create and manage temporary files.
+    /// </param>
+    /// <param name="maxStandardOutputBytes">
+    /// The maximum number of bytes that standard output may write.
+    /// </param>
+    /// <param name="maxStandardErrorBytes">
+    /// The maximum number of bytes that standard error may write.
+    /// </param>
     public FileStreamPipeStrategy(
         IFileSystem fileSystem,
         long maxStandardOutputBytes = DefaultMaxOutputBytes,
@@ -48,16 +65,15 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     {
     }
 
-
     /// <summary>
     /// Initializes a new instance of the
     /// <see cref="FileStreamPipeStrategy"/> class.
     /// </summary>
     /// <param name="fileSystem">
-    /// The file system abstraction used to create and manage temporary files.
+    /// The file-system abstraction used to create and manage temporary files.
     /// </param>
     /// <param name="outputStreamFactory">
-    /// The factory to instantiate output stream.
+    /// The factory used to create output streams.
     /// </param>
     /// <param name="maxStandardOutputBytes">
     /// The maximum number of bytes that standard output may write.
@@ -66,7 +82,8 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     /// The maximum number of bytes that standard error may write.
     /// </param>
     /// <exception cref="ArgumentNullException">
-    /// Thrown when <paramref name="fileSystem"/> is null.
+    /// Thrown when <paramref name="fileSystem"/> or
+    /// <paramref name="outputStreamFactory"/> is null.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when an output quota is less than or equal to zero.
@@ -117,7 +134,6 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                 $"cli_stderr_{Guid.NewGuid():N}.tmp");
     }
 
-
     /// <inheritdoc />
     public Command ConfigurePipes(
         Command command,
@@ -141,8 +157,7 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                 _isDisposed,
                 this);
 
-            if (_stdoutStream is not null ||
-                _stderrStream is not null)
+            if (_isConfigured)
             {
                 throw new InvalidOperationException(
                     "The file stream pipe strategy has already been configured.");
@@ -155,7 +170,7 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
             {
                 stdoutFileStream =
                     _outputStreamFactory.Create(
-                    _stdoutFilePath);
+                        _stdoutFilePath);
 
                 stderrFileStream =
                     _outputStreamFactory.Create(
@@ -177,27 +192,50 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
 
                 stderrFileStream = null;
 
-                _outputEncoding = encoding;
+                _outputEncoding =
+                    encoding;
 
-                return command
-                    .WithStandardOutputPipe(
-                        PipeTarget.ToStream(
-                            _stdoutStream))
-                    .WithStandardErrorPipe(
-                        PipeTarget.ToStream(
-                            _stderrStream));
+                Command configuredCommand =
+                    command
+                        .WithStandardOutputPipe(
+                            PipeTarget.ToStream(
+                                _stdoutStream))
+                        .WithStandardErrorPipe(
+                            PipeTarget.ToStream(
+                                _stderrStream));
+
+                _isConfigured = true;
+
+                return configuredCommand;
             }
             catch
             {
-                _stdoutStream?.Dispose();
-                _stderrStream?.Dispose();
+                /*
+                 * Preserve the configuration exception. Rollback is
+                 * best-effort because cleanup must never replace the primary
+                 * configuration failure.
+                 */
+                TryDisposeStream(
+                    _stdoutStream);
 
-                stdoutFileStream?.Dispose();
-                stderrFileStream?.Dispose();
+                TryDisposeStream(
+                    _stderrStream);
+
+                TryDisposeStream(
+                    stdoutFileStream);
+
+                TryDisposeStream(
+                    stderrFileStream);
 
                 _stdoutStream = null;
                 _stderrStream = null;
                 _outputEncoding = null;
+
+                TryDeleteTemporaryFile(
+                    _stdoutFilePath);
+
+                TryDeleteTemporaryFile(
+                    _stderrFilePath);
 
                 throw;
             }
@@ -208,35 +246,10 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Validates that an output quota is a positive byte count.
-    /// </summary>
-    /// <param name="maximumBytes">
-    /// The maximum permitted number of bytes.
-    /// </param>
-    /// <param name="parameterName">
-    /// The name of the parameter being validated.
-    /// </param>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// Thrown when <paramref name="maximumBytes"/> is less than or equal to zero.
-    /// </exception>
-    private static void ValidateOutputLimit(
-        long maximumBytes,
-        string parameterName)
-    {
-        if (maximumBytes <= 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                parameterName,
-                maximumBytes,
-                "Maximum output bytes must be greater than zero.");
-        }
-    }
-
-
     /// <inheritdoc />
-    /// <inheritdoc />
-    public async Task<(string StandardOutput, string StandardError)> GetResultAsync()
+    public async Task<(
+        string StandardOutput,
+        string StandardError)> GetResultAsync()
     {
         ObjectDisposedException.ThrowIf(
             _isDisposed,
@@ -253,6 +266,12 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
             ObjectDisposedException.ThrowIf(
                 _isDisposed,
                 this);
+
+            if (!_isConfigured)
+            {
+                throw new InvalidOperationException(
+                    "The file stream pipe strategy has not been configured.");
+            }
 
             outputEncoding =
                 _outputEncoding
@@ -289,12 +308,183 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
             stderr);
     }
 
+    /// <inheritdoc />
+    public async Task CleanupAsync()
+    {
+        await _fileSemaphore
+            .WaitAsync()
+            .ConfigureAwait(false);
 
+        try
+        {
+            if (_executionCleanupCompleted)
+            {
+                return;
+            }
+
+            Exception? firstException = null;
+
+            try
+            {
+                await FlushAndCloseStreamsInternalAsync()
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                firstException =
+                    exception;
+            }
+            finally
+            {
+                /*
+                 * File deletion must still be attempted even when stream
+                 * flushing or disposal fails.
+                 */
+                TryDeleteTemporaryFile(
+                    _stdoutFilePath);
+
+                TryDeleteTemporaryFile(
+                    _stderrFilePath);
+
+                _executionCleanupCompleted = true;
+            }
+
+            if (firstException is not null)
+            {
+                ExceptionDispatchInfo
+                    .Capture(firstException)
+                    .Throw();
+            }
+        }
+        finally
+        {
+            _fileSemaphore.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        Exception? cleanupException = null;
+
+        await _fileSemaphore
+            .WaitAsync()
+            .ConfigureAwait(false);
+
+        try
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            if (!_executionCleanupCompleted)
+            {
+                try
+                {
+                    await CleanupInternalAsync()
+                        .ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    cleanupException =
+                        exception;
+                }
+            }
+
+            _isDisposed = true;
+        }
+        finally
+        {
+            _fileSemaphore.Release();
+        }
+
+        GC.SuppressFinalize(this);
+
+        if (cleanupException is not null)
+        {
+            ExceptionDispatchInfo
+                .Capture(cleanupException)
+                .Throw();
+        }
+    }
+
+    /// <summary>
+    /// Cleans execution-scoped resources while the strategy semaphore is held.
+    /// </summary>
+    /// <returns>
+    /// A task that represents the asynchronous cleanup operation.
+    /// </returns>
+    private async Task CleanupInternalAsync()
+    {
+        Exception? firstException = null;
+
+        try
+        {
+            await FlushAndCloseStreamsInternalAsync()
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            firstException =
+                exception;
+        }
+        finally
+        {
+            TryDeleteTemporaryFile(
+                _stdoutFilePath);
+
+            TryDeleteTemporaryFile(
+                _stderrFilePath);
+
+            _executionCleanupCompleted = true;
+        }
+
+        if (firstException is not null)
+        {
+            ExceptionDispatchInfo
+                .Capture(firstException)
+                .Throw();
+        }
+    }
+
+    /// <summary>
+    /// Validates that an output quota is a positive byte count.
+    /// </summary>
+    /// <param name="maximumBytes">
+    /// The maximum permitted number of bytes.
+    /// </param>
+    /// <param name="parameterName">
+    /// The name of the parameter being validated.
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="maximumBytes"/> is less than or equal to zero.
+    /// </exception>
+    private static void ValidateOutputLimit(
+        long maximumBytes,
+        string parameterName)
+    {
+        if (maximumBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                maximumBytes,
+                "Maximum output bytes must be greater than zero.");
+        }
+    }
 
     /// <summary>
     /// Flushes and closes all configured output streams.
     /// The caller must hold the strategy semaphore before invoking this method.
     /// </summary>
+    /// <returns>
+    /// A task that represents the asynchronous close operation.
+    /// </returns>
     private async Task FlushAndCloseStreamsInternalAsync()
     {
         Stream? stdoutStream =
@@ -316,9 +506,10 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                         stdoutStream)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                firstException = ex;
+                firstException =
+                    exception;
             }
         }
 
@@ -330,15 +521,15 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
                         stderrStream)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                firstException ??= ex;
+                firstException ??=
+                    exception;
             }
         }
 
         if (firstException is not null)
         {
-            // 為了保留原始 exception stack trace。
             ExceptionDispatchInfo
                 .Capture(firstException)
                 .Throw();
@@ -351,6 +542,9 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     /// <param name="stream">
     /// The stream to flush and dispose.
     /// </param>
+    /// <returns>
+    /// A task that represents the asynchronous cleanup operation.
+    /// </returns>
     private static async Task FlushAndDisposeStreamAsync(
         Stream stream)
     {
@@ -368,11 +562,9 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
         }
     }
 
-
-
     /// <summary>
-    /// Reads captured command output from a file while enforcing
-    /// the configured in-memory read limit.
+    /// Reads captured command output from a file while enforcing the configured
+    /// in-memory read limit.
     /// </summary>
     /// <param name="filePath">
     /// The path of the captured output file.
@@ -460,10 +652,9 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
             fullBytesRead);
     }
 
-
     /// <summary>
-    /// Reads from the specified stream until the destination buffer is full
-    /// or the end of the stream is reached.
+    /// Reads from the specified stream until the destination buffer is full or
+    /// the end of the stream is reached.
     /// </summary>
     /// <param name="stream">
     /// The source stream.
@@ -504,67 +695,33 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
         return totalBytesRead;
     }
 
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Attempts to dispose a stream without replacing an existing primary
+    /// configuration exception.
+    /// </summary>
+    /// <param name="stream">
+    /// The stream to dispose, or <see langword="null"/>.
+    /// </param>
+    private static void TryDisposeStream(
+        Stream? stream)
     {
-        if (_isDisposed)
+        if (stream is null)
         {
             return;
         }
 
-        await _fileSemaphore
-            .WaitAsync()
-            .ConfigureAwait(false);
-
         try
         {
-            if (_isDisposed)
-            {
-                return;
-            }
-
-            _isDisposed = true;
-
-            if (_stdoutStream is not null)
-            {
-                await _stdoutStream
-                    .FlushAsync()
-                    .ConfigureAwait(false);
-
-                await _stdoutStream
-                    .DisposeAsync()
-                    .ConfigureAwait(false);
-
-                _stdoutStream = null;
-            }
-
-            if (_stderrStream is not null)
-            {
-                await _stderrStream
-                    .FlushAsync()
-                    .ConfigureAwait(false);
-
-                await _stderrStream
-                    .DisposeAsync()
-                    .ConfigureAwait(false);
-
-                _stderrStream = null;
-            }
-
-            TryDeleteTemporaryFile(
-                _stdoutFilePath);
-
-            TryDeleteTemporaryFile(
-                _stderrFilePath);
+            stream.Dispose();
         }
-        finally
+        catch
         {
-            _fileSemaphore.Release();
+            /*
+             * Configuration rollback is best-effort. The original
+             * configuration exception must remain authoritative.
+             */
         }
-
-        GC.SuppressFinalize(this);
     }
-
 
     /// <summary>
     /// Attempts to delete a temporary output file.
@@ -577,12 +734,12 @@ public class FileStreamPipeStrategy : ICommandPipeStrategy, IAsyncDisposable
     {
         try
         {
-            if (_fileSystem.File.Exists(
-                    filePath))
-            {
-                _fileSystem.File.Delete(
-                    filePath);
-            }
+            /*
+             * File.Delete semantics are already tolerant of a missing file.
+             * Avoid an Exists/Delete check-then-act window.
+             */
+            _fileSystem.File.Delete(
+                filePath);
         }
         catch (IOException)
         {

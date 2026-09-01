@@ -12,6 +12,9 @@ namespace CliUtilityServices;
 public sealed class CliWrapCommandExecutionEngine
     : ICommandExecutionEngine
 {
+    private const string PipeCleanupExceptionDataKey =
+        "CliUtilityServices.PipeCleanupException";
+
     private readonly IExecutableResolver _executableResolver;
     private readonly IChildEnvironmentResolver _environmentResolver;
     private readonly IWorkingDirectoryResolver _workingDirectoryResolver;
@@ -19,16 +22,16 @@ public sealed class CliWrapCommandExecutionEngine
     /// <summary>
     /// Initializes a new instance of the
     /// <see cref="CliWrapCommandExecutionEngine"/> class.
-/// </summary>
+    /// </summary>
     /// <param name="executableResolver">
     /// The executable resolver.
-/// </param>
+    /// </param>
     /// <param name="environmentResolver">
     /// The child-process environment resolver.
-/// </param>
+    /// </param>
     /// <param name="workingDirectoryResolver">
     /// The child-process working-directory resolver.
-/// </param>
+    /// </param>
     public CliWrapCommandExecutionEngine(
         IExecutableResolver executableResolver,
         IChildEnvironmentResolver environmentResolver,
@@ -95,36 +98,95 @@ public sealed class CliWrapCommandExecutionEngine
                     resolvedWorkingDirectory);
         }
 
-        command =
-            pipeStrategy.ConfigurePipes(
-                command,
-                commandLineInput.OutputEncoding);
-
-        var stopwatch =
-            Stopwatch.StartNew();
-
-        CliWrap.CommandResult rawResult;
+        Exception? primaryException = null;
+        Stopwatch? stopwatch = null;
 
         try
         {
-            rawResult =
+            command =
+                pipeStrategy.ConfigurePipes(
+                    command,
+                    commandLineInput.OutputEncoding);
+
+            stopwatch =
+                Stopwatch.StartNew();
+
+            CliWrap.CommandResult rawResult =
                 await command.ExecuteAsync(
-                    cancellationToken);
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+            (
+                string standardOutput,
+                string standardError
+            ) = await pipeStrategy
+                .GetResultAsync()
+                .ConfigureAwait(false);
+
+            return new CommandExecutionResult(
+                StandardOutput: standardOutput,
+                StandardError: standardError,
+                ExitCode: rawResult.ExitCode,
+                RunTime: stopwatch.Elapsed);
+        }
+        catch (Exception exception)
+        {
+            primaryException = exception;
+            throw;
         }
         finally
         {
-            stopwatch.Stop();
+            stopwatch?.Stop();
+
+            await CleanupPipeStrategyAsync(
+                    pipeStrategy,
+                    primaryException)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Cleans execution-scoped pipe resources while preserving the primary
+    /// command exception when both command execution and cleanup fail.
+    /// </summary>
+    /// <param name="pipeStrategy">
+    /// The command pipe strategy associated with the execution.
+    /// </param>
+    /// <param name="primaryException">
+    /// The primary exception raised by command configuration, execution, or
+    /// result retrieval, or <see langword="null"/> when the primary operation
+    /// completed successfully.
+    /// </param>
+    /// <returns>
+    /// A task that represents the asynchronous cleanup operation.
+    /// </returns>
+    private static async Task CleanupPipeStrategyAsync(
+        ICommandPipeStrategy pipeStrategy,
+        Exception? primaryException)
+    {
+        if (pipeStrategy is not IExecutionScopedPipeStrategy
+            executionScopedPipeStrategy)
+        {
+            return;
         }
 
-        (
-            string standardOutput,
-            string standardError
-        ) = await pipeStrategy.GetResultAsync();
-
-        return new CommandExecutionResult(
-            StandardOutput: standardOutput,
-            StandardError: standardError,
-            ExitCode: rawResult.ExitCode,
-            RunTime: stopwatch.Elapsed);
+        try
+        {
+            await executionScopedPipeStrategy
+                .CleanupAsync()
+                .ConfigureAwait(false);
+        }
+        catch (Exception cleanupException)
+            when (primaryException is not null)
+        {
+            /*
+             * Preserve the original execution failure as the thrown exception.
+             * The secondary cleanup failure remains available for diagnostics
+             * without replacing the primary exception type or stack trace.
+             */
+            primaryException.Data[
+                PipeCleanupExceptionDataKey] =
+                cleanupException;
+        }
     }
 }
