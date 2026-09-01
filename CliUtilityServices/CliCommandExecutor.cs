@@ -285,7 +285,8 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
                 : TerminalTypeOptions.Zsh;
         }
 
-        return TerminalTypeOptions.Bash;
+        throw new PlatformNotSupportedException(
+            "Automatic terminal detection is not supported on the current operating system.");
     }
 
     /// <summary>
