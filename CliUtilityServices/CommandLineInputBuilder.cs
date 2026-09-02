@@ -369,7 +369,6 @@ public sealed class CommandLineInputBuilder
                 pair => pair.Value,
                 ConfigurationStorageComparer);
 
-
         return this;
     }
 
@@ -611,7 +610,8 @@ public sealed class CommandLineInputBuilder
             nameof(_command));
 
         // This null check is intentionally omitted.
-        // See WithEnvironmentService(IEnvironmentService) for the compatibility rationale.
+        // See WithEnvironmentService(IEnvironmentService)
+        // for the compatibility rationale.
         // ArgumentNullException.ThrowIfNull(
         //     _environmentService,
         //     nameof(_environmentService));

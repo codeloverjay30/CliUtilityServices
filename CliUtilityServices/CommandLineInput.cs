@@ -125,7 +125,8 @@ public record class CommandLineInput
     /// Gets the environment policy that controls which environment variables
     /// the child process may inherit or receive.
     /// </summary>
-    public ChildEnvironmentPolicy EnvironmentPolicy { get; init; } = ChildEnvironmentPolicies.Compatible;
+    public ChildEnvironmentPolicy EnvironmentPolicy { get; init; }
+        = ChildEnvironmentPolicies.Compatible;
 
     /// <summary>
     /// Gets the encoding used for standard input.
