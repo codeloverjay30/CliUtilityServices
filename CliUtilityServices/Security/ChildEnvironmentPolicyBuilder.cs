@@ -1,5 +1,3 @@
-using System.Collections.Frozen;
-
 namespace CliUtilityServices.Security;
 
 /// <summary>
@@ -21,7 +19,7 @@ public class ChildEnvironmentPolicyBuilder
         {
             Mode = ChildEnvironmentMode.AllowList,
             AllowedVariables =
-                CreateFrozenSet(
+                ValidateSet(
                     environmentVariables,
                     nameof(environmentVariables),
                     "Environment variables cannot be empty.")
@@ -43,7 +41,7 @@ public class ChildEnvironmentPolicyBuilder
         {
             Mode = ChildEnvironmentMode.AllowInheritedList,
             AllowedInheritedVariables =
-                CreateFrozenSet(
+                ValidateSet(
                     allowedInheritedVariables,
                     nameof(allowedInheritedVariables),
                     "Allowed inherited variables cannot be empty.")
@@ -69,12 +67,12 @@ public class ChildEnvironmentPolicyBuilder
         {
             Mode = ChildEnvironmentMode.AllowInheritedList,
             AllowedInheritedVariables =
-                CreateFrozenSet(
+                ValidateSet(
                     allowedInheritedVariables,
                     nameof(allowedInheritedVariables),
                     "Allowed inherited variables cannot be empty."),
             DeniedVariables =
-                CreateFrozenSet(
+                ValidateSet(
                     deniedVariables,
                     nameof(deniedVariables),
                     "Denied variables cannot be empty.")
@@ -95,7 +93,7 @@ public class ChildEnvironmentPolicyBuilder
         {
             Mode = ChildEnvironmentMode.DenyList,
             DeniedVariables =
-                CreateFrozenSet(
+                ValidateSet(
                     deniedVariables,
                     nameof(deniedVariables),
                     "Denied variables cannot be empty.")
@@ -103,7 +101,7 @@ public class ChildEnvironmentPolicyBuilder
     }
 
     /// <summary>
-    /// Creates an immutable ordinal snapshot of an environment-variable set.
+    /// Validates an environment-variable set before it is assigned to a policy.
     /// </summary>
     /// <param name="variables">
     /// The source environment-variable set.
@@ -114,8 +112,8 @@ public class ChildEnvironmentPolicyBuilder
     /// <param name="emptyCollectionMessage">
     /// The exception message used when the source set is empty.
     /// </param>
-    /// <returns>An immutable ordinal snapshot of the source set.</returns>
-    private static FrozenSet<string> CreateFrozenSet(
+    /// <returns>The validated source set.</returns>
+    private static IReadOnlySet<string> ValidateSet(
         IReadOnlySet<string> variables,
         string parameterName,
         string emptyCollectionMessage)
@@ -131,7 +129,6 @@ public class ChildEnvironmentPolicyBuilder
                 parameterName);
         }
 
-        return variables.ToFrozenSet(
-            StringComparer.Ordinal);
+        return variables;
     }
 }

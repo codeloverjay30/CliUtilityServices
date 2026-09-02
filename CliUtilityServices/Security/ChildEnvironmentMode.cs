@@ -1,3 +1,6 @@
+
+namespace CliUtilityServices.Security;
+
 /// <summary>
 /// Defines how environment variables are inherited by a child process.
 /// </summary>
@@ -25,7 +28,7 @@ public enum ChildEnvironmentMode
     /// NEVER consider it as the ONLY DEFENSIVE MODE
     /// since the blacklist is numerous, and we can't enumerate it infinitely.
     /// Thus, ALWAYS use it with other modes (using flags) 
-    /// </remark>
+    /// </remarks>
     DenyList = 1,
 
     /// <summary>

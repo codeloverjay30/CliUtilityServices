@@ -57,7 +57,8 @@ public record class CommandLineInput
         = new Dictionary<string, string?>();
 
     /// <summary>
-    /// Gets a child environment policy to determine the child process should inherit or disallowed which environment variables.
+    /// Gets the environment policy that controls which environment variables
+    /// the child process may inherit or receive.
     /// </summary>
     public ChildEnvironmentPolicy EnvironmentPolicy { get; init; } = ChildEnvironmentPolicies.Compatible;
 
@@ -92,7 +93,7 @@ public record class CommandLineInput
         }
     }
 
-    // <summary>
+    /// <summary>
     /// Gets the legacy environment service associated with this request.
     /// </summary>
     /// <remarks>

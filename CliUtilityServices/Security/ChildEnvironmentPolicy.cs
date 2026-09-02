@@ -1,5 +1,7 @@
 using System.Collections.Frozen;
 
+namespace CliUtilityServices.Security;
+
 /// <summary>
 /// Defines the environment inheritance policy for a child process.
 /// </summary>

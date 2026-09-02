@@ -1,3 +1,4 @@
+using CliUtilityServices.Security;
 using FluentAssertions;
 
 namespace CliUtilityServices.Tests.Security;
