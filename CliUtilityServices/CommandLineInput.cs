@@ -83,10 +83,30 @@ public record class CommandLineInput
         }
     }
 
+    private string _workingDirectory = string.Empty;
+
     /// <summary>
     /// Gets the working directory used by the child process.
     /// </summary>
-    public string WorkingDirectory { get; init; } = string.Empty;
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when the assigned working directory is null.
+    /// </exception>
+    public string WorkingDirectory
+    {
+        get =>
+            _workingDirectory;
+
+        init
+        {
+            ArgumentNullException.ThrowIfNull(
+                value);
+
+            _workingDirectory =
+                value;
+        }
+    }
+
+
 
     /// <summary>
     /// Gets the command result validation strategy.
