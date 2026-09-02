@@ -99,3 +99,16 @@ You can choose one of approaches using different strategy pattern.
 
 + Use an fluent API (new added) to create a command line input instead of factory.
 
+## 6.0.0-preview-1.0.0
+### Refactor
++ Use resolver to solve the path etc
+
++ Use validator to validate the path etc.
+
++ Add defensive programming.
+
+See more on [issues on GitHub repo](https://github.com/codeloverjay30/CliUtilityServices/issues/)
+
+### Potential bug fix
+
+See [issues on GitHub repo](https://github.com/codeloverjay30/CliUtilityServices/issues/)
