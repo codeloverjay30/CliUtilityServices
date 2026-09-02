@@ -256,8 +256,6 @@ public class FileStreamPipeStrategy :
             _isDisposed,
             this);
 
-        Encoding outputEncoding;
-
         await _fileSemaphore
             .WaitAsync()
             .ConfigureAwait(false);
@@ -274,39 +272,39 @@ public class FileStreamPipeStrategy :
                     "The file stream pipe strategy has not been configured.");
             }
 
-            outputEncoding =
+            Encoding outputEncoding =
                 _outputEncoding
                 ?? throw new InvalidOperationException(
                     "The file stream pipe strategy has not been configured.");
 
             await FlushAndCloseStreamsInternalAsync()
                 .ConfigureAwait(false);
+
+            const int maxReadBytes =
+                10 * 1024 * 1024;
+
+            string stdout =
+                await ReadFileWithLimitAsync(
+                        _stdoutFilePath,
+                        maxReadBytes,
+                        outputEncoding)
+                    .ConfigureAwait(false);
+
+            string stderr =
+                await ReadFileWithLimitAsync(
+                        _stderrFilePath,
+                        maxReadBytes,
+                        outputEncoding)
+                    .ConfigureAwait(false);
+
+            return (
+                stdout,
+                stderr);
         }
         finally
         {
             _fileSemaphore.Release();
         }
-
-        const int maxReadBytes =
-            10 * 1024 * 1024;
-
-        string stdout =
-            await ReadFileWithLimitAsync(
-                    _stdoutFilePath,
-                    maxReadBytes,
-                    outputEncoding)
-                .ConfigureAwait(false);
-
-        string stderr =
-            await ReadFileWithLimitAsync(
-                    _stderrFilePath,
-                    maxReadBytes,
-                    outputEncoding)
-                .ConfigureAwait(false);
-
-        return (
-            stdout,
-            stderr);
     }
 
     /// <inheritdoc />
@@ -598,12 +596,11 @@ public class FileStreamPipeStrategy :
         ArgumentNullException.ThrowIfNull(
             encoding);
 
-        if (!_fileSystem.File.Exists(
-                filePath))
-        {
-            return string.Empty;
-        }
-
+        /*
+         * Open the capture file directly. A configured strategy owns these
+         * files for the entire result-read lifecycle, so a missing file is a
+         * lifecycle failure and must not be silently converted to empty output.
+         */
         using Stream stream =
             _fileSystem.File.OpenRead(
                 filePath);
