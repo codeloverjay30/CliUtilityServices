@@ -59,9 +59,8 @@ public sealed class CliWrapCommandExecutionEngine
         CommandLineInput commandLineInput,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(
-            commandLineInput,
-            nameof(commandLineInput));
+        CommandLineInputValidator.ValidateForExecution(
+            commandLineInput);
 
         string executablePath =
             _executableResolver.Resolve(
@@ -74,8 +73,7 @@ public sealed class CliWrapCommandExecutionEngine
                     commandLineInput.EnvironmentVariables);
 
         ICommandPipeStrategy pipeStrategy =
-            commandLineInput.PipeStrategy
-            ?? new SlidingWindowPipeStrategy(500);
+            commandLineInput.PipeStrategy;
 
         Command command =
             Cli.Wrap(executablePath)

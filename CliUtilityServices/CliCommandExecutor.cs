@@ -78,9 +78,8 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
         CommandLineInput commandLineInput,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(commandLineInput);
-
-        ValidateCommandInput(commandLineInput);
+        CommandLineInputValidator.ValidateForExecution(
+            commandLineInput);
 
         using var timeoutCancellationTokenSource =
             CreateTimeoutCancellationTokenSource(commandLineInput.Timeout);
@@ -194,25 +193,6 @@ public sealed class CliCommandExecutor : ICliCommandExecutor
         return ExecuteProcessAsync(commandLineInput);
     }
     
-
-    /// <summary>
-    /// Validates command execution configuration before process creation.
-    /// </summary>
-    /// <param name="input">The command input to validate.</param>
-    private static void ValidateCommandInput(CommandLineInput input)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(input.Command);
-        ArgumentNullException.ThrowIfNull(input.Arguments);
-        ArgumentNullException.ThrowIfNull(input.PipeStrategy);
-
-        if (input.Timeout is { } timeout && timeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(input.Timeout),
-                timeout,
-                "Timeout must be greater than zero.");
-        }
-    }
 
     /// <summary>
     /// Creates a cancellation source for the configured timeout.
