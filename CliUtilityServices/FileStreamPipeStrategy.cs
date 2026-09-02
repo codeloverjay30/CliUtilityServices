@@ -231,10 +231,10 @@ public class FileStreamPipeStrategy :
                 _stderrStream = null;
                 _outputEncoding = null;
 
-                TryDeleteTemporaryFile(
+                TryDeleteTemporaryFileBestEffort(
                     _stdoutFilePath);
 
-                TryDeleteTemporaryFile(
+                TryDeleteTemporaryFileBestEffort(
                     _stderrFilePath);
 
                 throw;
@@ -338,13 +338,16 @@ public class FileStreamPipeStrategy :
             {
                 /*
                  * File deletion must still be attempted even when stream
-                 * flushing or disposal fails.
+                 * flushing or disposal fails. Preserve the first cleanup
+                 * exception while continuing with all remaining cleanup.
                  */
                 TryDeleteTemporaryFile(
-                    _stdoutFilePath);
+                    _stdoutFilePath,
+                    ref firstException);
 
                 TryDeleteTemporaryFile(
-                    _stderrFilePath);
+                    _stderrFilePath,
+                    ref firstException);
 
                 _executionCleanupCompleted = true;
             }
@@ -437,10 +440,12 @@ public class FileStreamPipeStrategy :
         finally
         {
             TryDeleteTemporaryFile(
-                _stdoutFilePath);
+                _stdoutFilePath,
+                ref firstException);
 
             TryDeleteTemporaryFile(
-                _stderrFilePath);
+                _stderrFilePath,
+                ref firstException);
 
             _executionCleanupCompleted = true;
         }
@@ -724,13 +729,19 @@ public class FileStreamPipeStrategy :
     }
 
     /// <summary>
-    /// Attempts to delete a temporary output file.
+    /// Attempts to delete a temporary output file and records the first
+    /// cleanup failure without preventing subsequent cleanup operations.
     /// </summary>
     /// <param name="filePath">
     /// The temporary file path.
     /// </param>
+    /// <param name="firstException">
+    /// The first cleanup exception observed during the current cleanup
+    /// operation.
+    /// </param>
     private void TryDeleteTemporaryFile(
-        string filePath)
+        string filePath,
+        ref Exception? firstException)
     {
         try
         {
@@ -741,13 +752,41 @@ public class FileStreamPipeStrategy :
             _fileSystem.File.Delete(
                 filePath);
         }
+        catch (Exception exception)
+            when (exception is IOException
+                or UnauthorizedAccessException)
+        {
+            firstException ??=
+                exception;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to delete a temporary output file during configuration
+    /// rollback without replacing the primary configuration exception.
+    /// </summary>
+    /// <param name="filePath">
+    /// The temporary file path.
+    /// </param>
+    private void TryDeleteTemporaryFileBestEffort(
+        string filePath)
+    {
+        try
+        {
+            _fileSystem.File.Delete(
+                filePath);
+        }
         catch (IOException)
         {
-            // Cleanup is best-effort.
+            /*
+             * Preserve the primary configuration exception.
+             */
         }
         catch (UnauthorizedAccessException)
         {
-            // Cleanup is best-effort.
+            /*
+             * Preserve the primary configuration exception.
+             */
         }
     }
 }
