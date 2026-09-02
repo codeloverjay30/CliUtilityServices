@@ -111,10 +111,19 @@ public sealed class CliWrapCommandExecutionEngine
             stopwatch =
                 Stopwatch.StartNew();
 
-            CliWrap.CommandResult rawResult =
-                await command.ExecuteAsync(
-                        cancellationToken)
-                    .ConfigureAwait(false);
+            CliWrap.CommandResult rawResult;
+
+            try
+            {
+                rawResult =
+                    await command.ExecuteAsync(
+                            cancellationToken)
+                        .ConfigureAwait(false);
+            }
+            finally
+            {
+                stopwatch.Stop();
+            }
 
             (
                 string standardOutput,
