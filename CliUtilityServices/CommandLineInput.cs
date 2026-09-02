@@ -25,6 +25,9 @@ public record class CommandLineInput
     private readonly Encoding? _outputEncoding;
     private Encoding? _defaultEncoding;
 
+    private IReadOnlyList<string> _arguments =
+        Array.Empty<string>();
+
     private IReadOnlyDictionary<string, string?> _environmentVariables =
         EmptyEnvironmentVariables;
 
@@ -40,10 +43,45 @@ public record class CommandLineInput
     public required string Command { get; init; }
 
     /// <summary>
-    /// Gets the arguments passed to the executable.
+    /// Gets an immutable snapshot of the arguments passed to the executable.
     /// </summary>
-    public IEnumerable<string> Arguments { get; init; }
-        = Array.Empty<string>();
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when the assigned argument collection is null.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the assigned argument collection contains a null value.
+    /// </exception>
+    public IEnumerable<string> Arguments
+    {
+        get =>
+            _arguments;
+
+        init
+        {
+            ArgumentNullException.ThrowIfNull(
+                value);
+
+            string[] materializedArguments =
+                value.ToArray();
+
+            ReadOnlySpan<string> argumentsSpan =
+                materializedArguments;
+
+            for (int index = 0; index < argumentsSpan.Length; index++)
+            {
+                if (argumentsSpan[index] is null)
+                {
+                    throw new ArgumentException(
+                        "Command-line arguments cannot contain null values.",
+                        nameof(value));
+                }
+            }
+
+            _arguments =
+                Array.AsReadOnly(
+                    materializedArguments);
+        }
+    }
 
     /// <summary>
     /// Gets the working directory used by the child process.
