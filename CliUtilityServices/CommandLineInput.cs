@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.ComponentModel;
 using System.Text;
 using CliUtilityServices.Pipes;
@@ -12,9 +13,20 @@ namespace CliUtilityServices;
 /// </summary>
 public record class CommandLineInput
 {
+    private static readonly FrozenDictionary<string, string?>
+        EmptyEnvironmentVariables =
+            Array.Empty<KeyValuePair<string, string?>>()
+                .ToFrozenDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value,
+                    StringComparer.Ordinal);
+
     private readonly Encoding? _inputEncoding;
     private readonly Encoding? _outputEncoding;
     private Encoding? _defaultEncoding;
+
+    private IReadOnlyDictionary<string, string?> _environmentVariables =
+        EmptyEnvironmentVariables;
 
     /// <summary>
     /// Gets the strategy used to capture command output.
@@ -53,8 +65,23 @@ public record class CommandLineInput
     /// <summary>
     /// Gets environment variables explicitly provided to the child process.
     /// </summary>
-    public IReadOnlyDictionary<string, string?> EnvironmentVariables { get; init; }
-        = new Dictionary<string, string?>();
+    public IReadOnlyDictionary<string, string?> EnvironmentVariables
+    {
+        get =>
+            _environmentVariables;
+
+        init
+        {
+            ArgumentNullException.ThrowIfNull(
+                value);
+
+            _environmentVariables =
+                value.ToFrozenDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value,
+                    StringComparer.Ordinal);
+        }
+    }
 
     /// <summary>
     /// Gets the environment policy that controls which environment variables

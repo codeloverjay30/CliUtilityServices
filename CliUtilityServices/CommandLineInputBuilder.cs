@@ -471,7 +471,7 @@ public sealed class CommandLineInputBuilder
         ValidateEnvironmentPolicy(environmentPolicy);
 
         _environmentPolicy =
-            CloneEnvironmentPolicy(environmentPolicy);
+            environmentPolicy;
 
         return this;
     }
@@ -530,8 +530,7 @@ public sealed class CommandLineInputBuilder
         {
             Mode = ChildEnvironmentMode.AllowInheritedList,
             AllowedInheritedVariables =
-                CopyEnvironmentVariableSet(
-                    allowedInheritedVariables)
+                allowedInheritedVariables
         };
 
         return this;
@@ -561,8 +560,7 @@ public sealed class CommandLineInputBuilder
         {
             Mode = ChildEnvironmentMode.AllowList,
             AllowedVariables =
-                CopyEnvironmentVariableSet(
-                    allowedVariables)
+                allowedVariables
         };
 
         return this;
@@ -596,8 +594,7 @@ public sealed class CommandLineInputBuilder
         {
             Mode = ChildEnvironmentMode.DenyList,
             DeniedVariables =
-                CopyEnvironmentVariableSet(
-                    deniedVariables)
+                deniedVariables
         };
 
         return this;
@@ -613,7 +610,8 @@ public sealed class CommandLineInputBuilder
             _command,
             nameof(_command));
 
-        /// Remove this check, see the remarks of <see cref="global::CliUtilityServices.CommandLineInputBuilder.WithEnvironmentService(IEnvironmentService)"/> for reason.
+        // This null check is intentionally omitted.
+        // See WithEnvironmentService(IEnvironmentService) for the compatibility rationale.
         // ArgumentNullException.ThrowIfNull(
         //     _environmentService,
         //     nameof(_environmentService));
@@ -656,13 +654,10 @@ public sealed class CommandLineInputBuilder
             Timeout = _timeout,
 
             EnvironmentVariables =
-                new Dictionary<string, string?>(
-                    _environmentVariables,
-                    ConfigurationStorageComparer),
+                _environmentVariables,
 
             EnvironmentPolicy =
-                CloneEnvironmentPolicy(
-                    _environmentPolicy),
+                _environmentPolicy,
 
             InputEncoding = _inputEncoding!,
             OutputEncoding = _outputEncoding!,
@@ -829,63 +824,4 @@ public sealed class CommandLineInputBuilder
             nameof(policy.Overrides));
     }
 
-    /// <summary>
-    /// Creates a defensive copy of a child environment policy.
-    /// </summary>
-    /// <param name="policy">
-    /// The policy to copy.
-    /// </param>
-    /// <returns>A defensive copy of the policy.</returns>
-    private ChildEnvironmentPolicy CloneEnvironmentPolicy(
-        ChildEnvironmentPolicy policy)
-    {
-        return new ChildEnvironmentPolicy
-        {
-            Mode = policy.Mode,
-
-            AllowedInheritedVariables =
-                CopyEnvironmentVariableSet(
-                    policy.AllowedInheritedVariables),
-
-            AllowedVariables =
-                CopyEnvironmentVariableSet(
-                    policy.AllowedVariables),
-
-            DeniedVariables =
-                CopyEnvironmentVariableSet(
-                    policy.DeniedVariables),
-
-            Overrides =
-                new Dictionary<string, string?>(
-                    policy.Overrides,
-                    ConfigurationStorageComparer)
-        };
-    }
-
-    /// <summary>
-    /// Creates a defensive copy of environment variable names.
-    /// </summary>
-    /// <param name="source">
-    /// The environment variable names to copy.
-    /// </param>
-    /// <returns>A defensive copy of the names.</returns>
-    /// <summary>
-    /// Creates a defensive copy of environment variable names
-    /// without applying operating-system-specific comparison semantics.
-    /// </summary>
-    /// <param name="source">
-    /// The environment variable names to copy.
-    /// </param>
-    /// <returns>
-    /// A defensive copy that preserves the supplied variable names.
-    /// </returns>
-    private static IReadOnlySet<string> CopyEnvironmentVariableSet(
-        IEnumerable<string> source)
-    {
-        ArgumentNullException.ThrowIfNull(source);
-
-        return new HashSet<string>(
-            source,
-            StringComparer.Ordinal);
-    }
 }

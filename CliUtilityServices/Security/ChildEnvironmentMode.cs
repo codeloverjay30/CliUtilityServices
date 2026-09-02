@@ -1,3 +1,5 @@
+namespace CliUtilityServices.Security;
+
 /// <summary>
 /// Defines how environment variables are inherited by a child process.
 /// </summary>
@@ -6,7 +8,7 @@ public enum ChildEnvironmentMode
     /// <summary>
     /// Inherits the complete parent process environment.
     /// </summary>
-    InheritAll = 16 ,
+    InheritAll = 16,
 
     /// <summary>
     /// Inherits only explicitly allowed parent environment variables.
