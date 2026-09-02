@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Abstractions;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -621,40 +622,64 @@ public class FileStreamPipeStrategy :
                 -maxBytes,
                 SeekOrigin.End);
 
-            byte[] buffer =
-                new byte[maxBytes];
+            byte[] rentedBuffer =
+                ArrayPool<byte>.Shared.Rent(
+                    maxBytes);
 
-            int bytesRead =
-                await ReadFullyAsync(
-                        stream,
-                        buffer)
-                    .ConfigureAwait(false);
+            try
+            {
+                int bytesRead =
+                    await ReadFullyAsync(
+                            stream,
+                            rentedBuffer.AsMemory(
+                                0,
+                                maxBytes))
+                        .ConfigureAwait(false);
 
-            return
-                "[... Target file output was too large and truncated for memory defense ...]" +
-                Environment.NewLine +
-                encoding.GetString(
-                    buffer,
-                    0,
-                    bytesRead);
+                return
+                    "[... Target file output was too large and truncated for memory defense ...]" +
+                    Environment.NewLine +
+                    encoding.GetString(
+                        rentedBuffer,
+                        0,
+                        bytesRead);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(
+                    rentedBuffer,
+                    clearArray: true);
+            }
         }
 
         int bufferLength =
             checked((int)fileLength);
 
-        byte[] fullBuffer =
-            new byte[bufferLength];
+        byte[] rentedFullBuffer =
+            ArrayPool<byte>.Shared.Rent(
+                bufferLength);
 
-        int fullBytesRead =
-            await ReadFullyAsync(
-                    stream,
-                    fullBuffer)
-                .ConfigureAwait(false);
+        try
+        {
+            int fullBytesRead =
+                await ReadFullyAsync(
+                        stream,
+                        rentedFullBuffer.AsMemory(
+                            0,
+                            bufferLength))
+                    .ConfigureAwait(false);
 
-        return encoding.GetString(
-            fullBuffer,
-            0,
-            fullBytesRead);
+            return encoding.GetString(
+                rentedFullBuffer,
+                0,
+                fullBytesRead);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(
+                rentedFullBuffer,
+                clearArray: true);
+        }
     }
 
     /// <summary>
